@@ -1,0 +1,8 @@
+[package]
+name = "dyscarn/dysconnect"
+description = ""
+version = "1.0.0"
+license = "Apache-2.0"
+authors = ["Dyscarn"]
+registry = "https://github.com/UpliftGames/wally-index"
+realm = "shared"

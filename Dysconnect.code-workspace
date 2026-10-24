@@ -1,0 +1,54 @@
+{
+	"folders": [
+		{
+			"path": "./"
+		}
+	],
+	
+	"extensions": {
+		"recommendations": [
+			"johnnymorganz.luau-lsp",
+			"evaera.vscode-rojo",
+			"johnnymorganz.stylua"
+		]
+	},
+	
+	"settings": {
+		"[lua]": {
+			"editor.defaultFormatter": "JohnnyMorganz.stylua",
+			"editor.formatOnSave": true
+		},
+		
+		"[luau]": {
+			"editor.defaultFormatter": "JohnnyMorganz.stylua",
+			"editor.formatOnSave": true
+		},
+		
+		"stylua.targetReleaseVersion": "latest",
+		
+		"search.exclude": {
+			"**/Packages": true,
+			"**/ServerPackages": true,
+		},
+		
+		"luau-lsp.sourcemap.rojoProjectFile": "default.project.json",
+		"luau-lsp.sourcemap.enabled": true,
+		
+		"luau-lsp.completion.imports.stringRequires.enabled": true,
+		"luau-lsp.completion.imports.suggestServices": true,
+		"luau-lsp.completion.imports.suggestRequires": true,
+		
+		"luau-lsp.fflags.enableNewSolver": true,
+		
+		"todo.embedded.exclude": [
+            "**/*.rbxlx",
+            "**/*.rbxl",
+            "**/Packages",
+            "**/ServerPackages",
+			"**/.git"
+		],
+		"luau-lsp.completion.imports.useConst": true,
+		"files.trimTrailingWhitespace": false,
+		"editor.trimAutoWhitespace": false,
+	}
+}
