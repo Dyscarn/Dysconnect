@@ -489,6 +489,27 @@ function Network.SetConnection(
 	}
 end
 
+const function Fire(player: Player, event: RemoteEvent | UnreliableRemoteEvent | RemoteFunction, name: string, Type: "REMOTE_EVENT" | "UREMOTE_EVENT" | "REMOTE_FUNCTION", ...)
+	if DEBUG.SentPackets then
+		print(`[DysNetworking (DEBUG)] Fired event of type "{Type}" with name "{name}".\n{debug.traceback()}`)
+	end
+
+	if Type == "REMOTE_FUNCTION" then
+		const Results = event:InvokeClient(player, ...)
+
+		if DEBUG.ReceivedPackets then
+			const BufferLength = Results[1] and typeof(Results[1]) == "buffer" and buffer.len(Results[1]) or 0
+			print(`[DysNetworking (DEBUG)] Received back results from a "REMOTE_FUNCTION" with name "{name}" and a size of {BufferLength} bytes.`)
+		end
+
+		const _, DecompressedResults, ArgCount = UnpackArgumentsFromNetwork(Results)
+		return UnpackArgTable(DecompressedResults, ArgCount)
+	else
+		event:FireClient(player, ...)
+	end
+	return
+end
+
 --- Fires a specific client's event / function connections.
 --- @param target  (`Player`):  The target client whose connections will be fired.
 --- @param name    (`string`):  The name of the desired event / function
@@ -526,27 +547,6 @@ function Network.FireClientConnection(target: Player | { Player }, name: string,
 	const Arguments = table.pack(...)
 	const CompressedArguments = PackArgumentsForNetwork(name, Arguments)
 
-	const function Fire(player: Player, ...)
-		if DEBUG.SentPackets then
-			print(`[DysNetworking (DEBUG)] Fired event of type "{Type}" with name "{name}".\n{debug.traceback()}`)
-		end
-
-		if Type == "REMOTE_FUNCTION" then
-			const Results = event:InvokeClient(player, ...)
-
-			if DEBUG.ReceivedPackets then
-				const BufferLength = Results[1] and typeof(Results[1]) == "buffer" and buffer.len(Results[1]) or 0
-				print(`[DysNetworking (DEBUG)] Received back results from a "REMOTE_FUNCTION" with name "{name}" and a size of {BufferLength} bytes.`)
-			end
-
-			const _, DecompressedResults, ArgCount = UnpackArgumentsFromNetwork(Results)
-			return UnpackArgTable(DecompressedResults, ArgCount)
-		else
-			event:FireClient(player, ...)
-		end
-		return
-	end
-
 	if typeof(target) == "table" then
 		const Results = {}
 		for _, player: Player in target do
@@ -555,7 +555,7 @@ function Network.FireClientConnection(target: Player | { Player }, name: string,
 		return Results
 	end
 
-	return Fire(target, CompressedArguments)
+	return Fire(target, event, name, Type, CompressedArguments)
 end
 
 --- Fires an event's connections to every single connected client. If the type of the object is a RemoteFunction, it won't do anything.
