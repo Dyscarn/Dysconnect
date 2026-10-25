@@ -1,6 +1,7 @@
 --i would comment this but i already wrote a whole commented DataTypes module that didn't do shit to optimize networking so now i'm too lazy to comment its entirety again
 --figure out what's here i'm done 😭 -dys
 
+--!strict
 --!native
 
 const HttpService = game:GetService("HttpService")
@@ -70,7 +71,7 @@ for _, enumItem in Enum.EasingDirection:GetEnumItems() do
 end
 
 const function DeepFreezeTable<T>(Target: T & {}): T & {} --if all tables are frozen it'll allow the engine to optimize data access since you can't really write on any tables
-	for _Name, Member in Target do
+	for _Name, Member in Target :: { any } do
 		if typeof(Member) == "table" then
 			DeepFreezeTable(Member)
 		end
@@ -149,7 +150,7 @@ function DataTypes.GetTagFromValue(Value: any): number
 	return DataTypes.Enum.JSON
 end
 
-function DataTypes.GetPayloadSize(tag: string, value: any): number
+function DataTypes.GetPayloadSize(tag: number, value: any): number
 	--if it has a fixed size, return that
 	if FixedSizes[tag] then
 		return FixedSizes[tag]
@@ -397,7 +398,7 @@ DataTypes.Writers = {
 
 		return Count
 	end,
-}
+} :: { [number]: (Buffer: buffer, Count: number, Value: any, InstanceList: { Instance }) -> number }
 
 DataTypes.Readers = {
 	[DataTypes.Enum.NIL] = function(_Buffer: buffer, Count: number): (nil, number)
@@ -535,7 +536,7 @@ DataTypes.Readers = {
 		return TweenInfo.new(Time, style, dir, count, reverses, Delay), Count + 16
 	end,
 
-	[DataTypes.Enum.Instance] = function(Buffer: buffer, Count: number, InstanceList: { Instance }): (Instance, number)
+	[DataTypes.Enum.Instance] = function(Buffer: buffer, Count: number, InstanceList: { Instance }): (Instance?, number)
 		const index = buffer.readu16(Buffer, Count)
 		const inst = InstanceList and InstanceList[index] or nil
 		return inst, Count + 2
@@ -567,6 +568,6 @@ DataTypes.Readers = {
 
 		return Table, Count
 	end,
-}
+} :: { (Buffer: buffer, Count: number, InstanceList: { Instance }) -> (any, number) }
 
 return DeepFreezeTable(DataTypes)

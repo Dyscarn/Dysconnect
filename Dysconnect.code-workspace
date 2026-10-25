@@ -31,7 +31,7 @@
 			"**/ServerPackages": true,
 		},
 		
-		"luau-lsp.sourcemap.rojoProjectFile": "default.project.json",
+		"luau-lsp.sourcemap.rojoProjectFile": "Dysconnect.project.json",
 		"luau-lsp.sourcemap.enabled": true,
 		
 		"luau-lsp.completion.imports.stringRequires.enabled": true,
