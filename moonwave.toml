@@ -1,0 +1,5 @@
+title = "Dysconnect"
+gitRepoUrl = "https://github.com/Dyscarn/Dysconnect"
+
+gitSourceBranch = "main"
+classOrder = ["Dysconnect", "Connection"]

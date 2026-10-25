@@ -64,7 +64,17 @@ end
 
 const IS_SERVER = RunService:IsServer()
 
+--[=[
+	@type Callback ((...any) -> any?) | ((Player: Player, ...any) -> any?)
+	@within Dysconnect
+]=]
 type Callback = ((...any) -> any?) | ((Player: Player, ...any) -> any?)
+--[=[
+	@type Predicate ((...any) -> boolean) | ((Player: Player, ...any) -> boolean)
+	@within Dysconnect
+	
+	Function containing sanity checks to execute a callback afterwards if it returns `true`.
+]=]
 type Predicate = ((...any) -> boolean) | ((Player: Player, ...any) -> boolean)
 
 const Connections = {} :: {
@@ -81,28 +91,51 @@ const Connections = {} :: {
 
 --[=[
 	@class Connection
+	@__index Connection
 	
 	Represents a connection to a network event or function.
 ]=]
 const Connection = {}
 Connection.__index = Connection
 
+--[=[
+	@interface Connection
+	@within Connection
+	
+	.Connected boolean -- If this [Connection] is still bound to its event.
+	.Type "REMOTE_EVENT" | "UREMOTE_EVENT" | "REMOTE_FUNCTION" | "BINDABLE_EVENT" -- The type of event it's connected to.
+	.Name string -- The name of the event it's connected to.
+	.Callback Callback -- The callback that'll execute when this connection receives a signal.
+]=]
 type Connection = typeof(setmetatable({} :: {
 	Connected: boolean,
 	Type: "REMOTE_EVENT" | "UREMOTE_EVENT" | "REMOTE_FUNCTION" | "BINDABLE_EVENT",
 	Name: string,
-	Callback: ((Player: Player, ...any) -> any?) | ((...any) -> any?),
+	Callback: Callback,
 }, {} :: {
 	Disconnect: (self: Connection) -> (),
 	Destroy: (self: Connection) -> (),
 }))
 
+--[=[
+	@within Connection
+	
+	Destroys this [Connection], rendering it unusuable and setting its [Connection.Connected] property to `false`.
+]=]
 function Connection.Disconnect(self: Connection)
 	Connections[self.Type][self.Name][self.Callback] = nil
 	table.clear(self)
 	self.Connected = false
 	setmetatable(self, nil)
 end
+--[=[
+	@function Destroy
+	@within Connection
+	
+	Equivalent to [Connection.Disconnect].
+	
+	@param self Connection
+]=]
 Connection.Destroy = Connection.Disconnect --shortcut for compatibility
 
 --[=[
@@ -531,7 +564,8 @@ end
 	
 	@param name string -- The name of the instance.
 	@param Type string -- The type of the instance.
-	@param Callback function -- The code that will run when the connection is fired.
+	@param Callback Callback -- The code that will run when the connection is fired.
+	@param Predicate Predicate
 	
 	@return Connection -- The set connection for further usage and cleanup.
 ]=]
