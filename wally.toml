@@ -10,4 +10,11 @@ homepage = "https://dyscarn.github.io/Dysconnect/"
 repository = "https://github.com/Dyscarn/Dysconnect"
 
 exclude = ["*"]
-include = ["src", "src/**", "LICENSE.md", "wally.toml", "README.md"]
+include = [
+	"src",
+	"src/**",
+	"LICENSE.md",
+	"wally.toml",
+	"README.md",
+	"default.project.json",
+]
