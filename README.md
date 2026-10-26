@@ -1,9 +1,9 @@
 <!--README.md based on Promise's (https://github.com/evaera/roblox-lua-promise) because I liked it.-->
 
-<div><center>
+<div align="center">
 	<h1>Dysconnect</h1>
 	<p>A networking library for Roblox designed to simplify communication between the client and server, with support for remote events, remote functions, and network exhaustion detection.</p>
-</center></div>
+</div>
 
 <!--moonwave-hide-before-this-line-->
 
