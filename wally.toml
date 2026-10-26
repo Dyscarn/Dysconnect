@@ -1,7 +1,7 @@
 [package]
 name = "dyscarn/dysconnect"
 description = "Lightweight, optimized networking library for Roblox with a unified API for remote events, unreliable remote events, remote functions, and bindable events. Features named connections, callback registration, predicate validation, connection management, and network traffic protection."
-version = "0.1.0"
+version = "0.1.1"
 license = "MIT"
 authors = ["Dyscarn"]
 registry = "https://github.com/UpliftGames/wally-index"
