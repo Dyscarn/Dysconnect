@@ -939,4 +939,5 @@ function Dysconnect.IsLive()
 	return ServiceLive
 end
 
+table.freeze(Connection)
 return table.freeze(Dysconnect)
