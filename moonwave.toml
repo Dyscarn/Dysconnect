@@ -5,6 +5,8 @@ gitSourceBranch = "main"
 classOrder = ["Dysconnect", "Connection"]
 
 [docusaurus]
+url = "https://dyscarn.github.io"
+baseUrl = "/Dysconnect"
 tagline = "A networking library for Roblox designed to simplify communication between the client and server, with support for remote events, remote functions, and network exhaustion detection."
 
 [[navbar.items]]
