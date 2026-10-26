@@ -3,3 +3,27 @@ gitRepoUrl = "https://github.com/Dyscarn/Dysconnect"
 
 gitSourceBranch = "main"
 classOrder = ["Dysconnect", "Connection"]
+
+[docusaurus]
+tagline = "A networking library for Roblox designed to simplify communication between the client and server, with support for remote events, remote functions, and network exhaustion detection."
+
+[[navbar.items]]
+href = "https://discord.gg/ggrYRh33RP"
+label = "Discord"
+position = "right"
+
+[home]
+enabled = true
+includeReadme = true
+
+[[home.features]]
+title = "Simple, centralized networking"
+description = "Manage supported Roblox networking types through a unified interface. Dysconnect keeps communication organized without requiring you to manage large collections of remote instances throughout your project."
+
+[[home.features]]
+title = "Efficient binary serialization"
+description = "Dysconnect uses Roblox's buffer library and a custom type-tagging system to encode supported values into a compact binary representation, with dedicated serialization logic for many Roblox data types."
+
+[[home.features]]
+title = "Network exhaustion detection"
+description = "Help protect your experience against excessive remote requests (DDoS) with configurable per-player usage limits and gradual recovery over time."

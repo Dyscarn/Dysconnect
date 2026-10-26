@@ -77,8 +77,37 @@ type Callback = ((...any) -> any?) | ((Player: Player, ...any) -> any?)
 ]=]
 type Predicate = ((...any) -> boolean) | ((Player: Player, ...any) -> boolean)
 
+--[=[
+	@type RemoteType "REMOTE_EVENT" | "UREMOTE_EVENT"
+	@within Dysconnect
+	
+	Event types that go over the network and don't return anything.
+]=]
+type RemoteType = "REMOTE_EVENT" | "UREMOTE_EVENT"
+--[=[
+	@type NetworkEventType RemoteType | "BINDABLE_EVENT"
+	@within Dysconnect
+	
+	Event types that do and don't go over the network but don't return anything.
+]=]
+type NetworkEventType = RemoteType | "BINDABLE_EVENT"
+--[=[
+	@type InvokableType RemoteType | "REMOTE_FUNCTION"
+	@within Dysconnect
+	
+	Event types that go over the network that do and don't return anything.
+]=]
+type InvokableType = RemoteType | "REMOTE_FUNCTION"
+--[=[
+	@type EventType RemoteType | NetworkEventType | InvokableType
+	@within Dysconnect
+	
+	All supported event and function types in Dysconnect.
+]=]
+type EventType = RemoteType | NetworkEventType | InvokableType
+
 const Connections = {} :: {
-	[("REMOTE_EVENT" | "UREMOTE_EVENT" | "REMOTE_FUNCTION" | "BINDABLE_EVENT")]: {
+	[EventType]: {
 		[string]: {
 			Callback: Callback?,
 			Predicate: Predicate?,
@@ -103,13 +132,13 @@ Connection.__index = Connection
 	@within Connection
 	
 	.Connected boolean -- If this [Connection] is still bound to its event.
-	.Type "REMOTE_EVENT" | "UREMOTE_EVENT" | "REMOTE_FUNCTION" | "BINDABLE_EVENT" -- The type of event it's connected to.
+	.Type EventType -- The type of event it's connected to.
 	.Name string -- The name of the event it's connected to.
 	.Callback Callback -- The callback that'll execute when this connection receives a signal.
 ]=]
 type Connection = typeof(setmetatable({} :: {
 	Connected: boolean,
-	Type: "REMOTE_EVENT" | "UREMOTE_EVENT" | "REMOTE_FUNCTION" | "BINDABLE_EVENT",
+	Type: EventType,
 	Name: string,
 	Callback: Callback,
 }, {} :: {
@@ -155,18 +184,60 @@ const Instances = {}
 
 local ServiceLive = false
 
-const DEBUG = table.freeze({
+--[=[
+	@interface DEBUG
+	@within Dysconnect
+	@private
+	
+	Debug print statement toggles.
+	
+	Modifiable in the network script or in [Dysconnect.Init].	
+	
+	.ReceivedPackets boolean -- Prints info whenever a packet is received on either side (including name, type and size in bytes).
+	.SentPackets boolean -- Prints info whenever a packet is sent from either side (including name and type).
+	.RateLimitExceeded boolean -- Prints info whenever a [Player] exceeds its rate limit, thus dropping the packets it sends (includes name and [Player.UserId]).
+	.ExcludeUnreliable boolean -- If `true`, will exclude [UnreliableRemoteEvent] send & receive prints (from [DEBUG.ReceivedPackets] and [DEBUG.SentPackets]).
+	.Strict boolean -- Prints a warn if an object of a type not supported by Dysconnect is trying to be sent over the network, falling back to JSON.
+]=]
+local DEBUG = table.freeze({
 	ReceivedPackets = true,
 	SentPackets = false,
 	RateLimitExceeded = true,
 	ExcludeUnreliable = true,
 	Strict = true,
 })
-const EXHAUSTION_DETECTION = table.freeze({
+--[=[
+	@interface EXHAUSTION_DETECTION
+	@within Dysconnect
+	@private
+	
+	Configuration for per-player network exhaustion detection.
+	Tracks incoming remote calls and gradually reduces the accumulated
+	usage over time to limit excessive requests.
+	
+	Modifiable in the network script or in [Dysconnect.Init].
+	
+	.RateLimit number -- Maximum accumulated usage before requests are rejected.
+	.RateDropPerSecond number -- Rate at which accumulated usage decays per second.
+	.URemoteEventRateIncreaseMult number -- Amount of usage added by each [UnreliableRemoteEvent] call.
+]=]
+local EXHAUSTION_DETECTION = table.freeze({
 	RateLimit = 50,
 	RateDropPerSecond = 18,
 	URemoteEventRateIncreaseMult = 0,
 })
+
+const function WriteMissingTableValues<T, S>(Target: T & {}, Values: S & {}): T & S & {}
+	for Key, Value in Values :: {[any]: any} do
+		if Target[Key] ~= nil then
+			continue
+		end
+		
+		Target[Key] = Value
+	end
+	
+	return Target
+end
 
 const PlayerExhaustionLogs = {}
 
@@ -341,7 +412,7 @@ const function UnpackArgumentsFromNetwork(Arguments: { any }): (string, { [any]:
 	return Name, Unpacked, Unpacked.n, #InstanceList
 end
 
-const function OnRemoteEventPacket(Player: Player?, Args: { any }, Type: "REMOTE_EVENT" | "UREMOTE_EVENT" | "BINDABLE_EVENT")
+const function OnRemoteEventPacket(Player: Player?, Args: { any }, Type: NetworkEventType)
 	--safety first gng
 	if IS_SERVER and not Player then
 		return
@@ -499,7 +570,7 @@ const function ServerInit()
 				return
 			end
 
-			OnRemoteEventPacket(Player, Args, Name :: "BINDABLE_EVENT" | "REMOTE_EVENT" | "UREMOTE_EVENT")
+			OnRemoteEventPacket(Player, Args, Name :: NetworkEventType)
 		end)
 	end
 
@@ -507,6 +578,8 @@ const function ServerInit()
 		--cleanup
 		PlayerExhaustionLogs[Player.UserId] = nil
 	end)
+	
+	print("[Dysconnect.Init()] Initialized networking on server successfully!")
 end
 
 const function ClientInit()
@@ -533,19 +606,31 @@ const function ClientInit()
 		end
 
 		(Instances[Name] :: RemoteEvent --[[ | UnreliableRemoteEvent ]]).OnClientEvent:Connect(function(Args: { any })
-			OnRemoteEventPacket(nil, Args, Name :: "BINDABLE_EVENT" | "REMOTE_EVENT" | "UREMOTE_EVENT")
+			OnRemoteEventPacket(nil, Args, Name :: NetworkEventType)
 		end)
 	end
+	
+	print("[Dysconnect.Init()] Initialized networking on client successfully!")
 end
 
 --[=[
 	@within Dysconnect
 	
 	Initializes the networking system in the current environment.
+	
+	@param DebugConfig DEBUG? -- Read [DEBUG].
+	@param ExhaustionDetectionConfig EXHAUSTION_DETECTION? -- Read [EXHAUSTION_DETECTION].
 ]=]
-function Dysconnect.Init()
+function Dysconnect.Init(DebugConfig: typeof(DEBUG)?, ExhaustionDetectionConfig: typeof(EXHAUSTION_DETECTION)?)
 	for Name, _ in NAMING_EQUIVALENTS do
-		Connections[Name :: "BINDABLE_EVENT" | "REMOTE_EVENT" | "REMOTE_FUNCTION" | "UREMOTE_EVENT"] = {}
+		Connections[Name :: EventType] = {}
+	end
+	
+	if DebugConfig then
+		DEBUG = table.freeze(WriteMissingTableValues(DebugConfig, DEBUG))
+	end
+	if ExhaustionDetectionConfig then
+		EXHAUSTION_DETECTION = table.freeze(WriteMissingTableValues(ExhaustionDetectionConfig, EXHAUSTION_DETECTION))
 	end
 
 	if IS_SERVER then
@@ -563,7 +648,7 @@ end
 	Adds a connection to a specific event / function instance.
 	
 	@param name string -- The name of the instance.
-	@param Type string -- The type of the instance.
+	@param Type EventType -- The type of the instance.
 	@param Callback Callback -- The code that will run when the connection is fired.
 	@param Predicate Predicate
 	
@@ -571,12 +656,12 @@ end
 ]=]
 function Dysconnect.SetConnection(
 	name: string,
-	Type: "REMOTE_EVENT" | "UREMOTE_EVENT" | "REMOTE_FUNCTION" | "BINDABLE_EVENT",
+	Type: EventType,
 	Callback: Callback,
 	Predicate: Predicate?
 ): Connection
 	if #name > 127 then
-		warn(`[Dysconnect:SetConnection()] Can't assign connection with name "{name}" because it's too long! Try to shorten it a bit.`)
+		warn(`[Dysconnect.SetConnection()] Can't assign connection with name "{name}" because it's too long! Try to shorten it a bit.`)
 		return {
 			Connected = false,
 		} :: Connection
@@ -606,7 +691,7 @@ function Dysconnect.SetConnection(
 	}, Connection) :: Connection
 end
 
-const function Fire(player: Player, event: RemoteEvent | UnreliableRemoteEvent | RemoteFunction, name: string, Type: "REMOTE_EVENT" | "UREMOTE_EVENT" | "REMOTE_FUNCTION", ...)
+const function Fire(player: Player, event: RemoteEvent | UnreliableRemoteEvent | RemoteFunction, name: string, Type: InvokableType, ...)
 	if DEBUG.SentPackets then
 		print(`[Dysconnect (DEBUG)] Fired event of type "{Type}" with name "{name}".\n{debug.traceback()}`)
 	end
@@ -635,37 +720,37 @@ end
 	
 	@param target Player -- The target client whose connections will be fired.
 	@param name string -- The name of the desired event / function.
-	@param Type string -- The type of instance to fire the connections of.
+	@param Type InvokableType -- The type of instance to fire the connections of.
 	@param ... any -- Any arguments to pass to the event.
 	
 	@return any | nil -- If a [RemoteFunction] is invoked using this, its returned values will be returned here.
 ]=]
-function Dysconnect.FireClientConnection(target: Player | { Player }, name: string, Type: "REMOTE_EVENT" | "UREMOTE_EVENT" | "REMOTE_FUNCTION", ...): any?
+function Dysconnect.FireClientConnection(target: Player | { Player }, name: string, Type: InvokableType, ...): any?
 	if not target then
-		warn(`[Dysconnect:FireClientConnection()] No target(s) for the event was/were provided!`, debug.traceback())
+		warn(`[Dysconnect.FireClientConnection()] No target(s) for the event was/were provided!`, debug.traceback())
 		return
 	end
 
 	if not name then
-		warn(`[Dysconnect:FireClientConnection()] No name was provided for the event!`, debug.traceback())
+		warn(`[Dysconnect.FireClientConnection()] No name was provided for the event!`, debug.traceback())
 		return
 	end
 
 	if #name > 127 then
-		warn(`[Dysconnect:FireClientConnection()] Can't fire connection with name "{name}" because it's too long! Try to shorten it a bit.`)
+		warn(`[Dysconnect.FireClientConnection()] Can't fire connection with name "{name}" because it's too long! Try to shorten it a bit.`)
 		return
 	end
 
 	Dysconnect.WaitForInit()
 
 	if not IS_SERVER then
-		warn("[Dysconnect:FireClientConnection()] This function shouldn't be called from the client. Make sure that it isn't!", debug.traceback())
+		warn("[Dysconnect.FireClientConnection()] This function shouldn't be called from the client. Make sure that it isn't!", debug.traceback())
 		return
 	end
 
 	const event = Instances[Type] :: RemoteFunction
 	if not event then
-		warn(`[Dysconnect:FireClientConnection()] Event {name} couldn't be fired because it doesn't exist! Are you sure you're spelling the type correctly? ({Type})`, debug.traceback())
+		warn(`[Dysconnect.FireClientConnection()] Event {name} couldn't be fired because it doesn't exist! Are you sure you're spelling the type correctly? ({Type})`, debug.traceback())
 		return
 	end
 
@@ -690,35 +775,35 @@ end
 	Fires an event's connections to every single connected client. If the type of the object is a [RemoteFunction], it won't do anything.
 	
 	@param name string -- The name of the desired event.
-	@param Type string -- The type of the event (Reliable / Unreliable).
+	@param Type RemoteType -- The type of the event (Reliable / Unreliable).
 	@param ... any -- Any arguments to pass to the event.
 ]=]
-function Dysconnect.FireAllClientConnection(name: string, Type: "REMOTE_EVENT" | "UREMOTE_EVENT", ...)
+function Dysconnect.FireAllClientConnection(name: string, Type: RemoteType, ...)
 	if not name then
-		warn(`[Dysconnect:FireAllClientConnection()] No name was provided for the event!`, debug.traceback())
+		warn(`[Dysconnect.FireAllClientConnection()] No name was provided for the event!`, debug.traceback())
 		return
 	end
 
 	if #name > 127 then
-		warn(`[Dysconnect:FireAllClientConnection()] Can't fire connection with name "{name}" because it's too long! Try to shorten it a bit.`, debug.traceback())
+		warn(`[Dysconnect.FireAllClientConnection()] Can't fire connection with name "{name}" because it's too long! Try to shorten it a bit.`, debug.traceback())
 		return
 	end
 
 	Dysconnect.WaitForInit()
 
 	if not IS_SERVER then
-		warn("[Dysconnect:FireAllClientConnection()] This function shouldn't be called from the client. Make sure that it isn't!", debug.traceback())
+		warn("[Dysconnect.FireAllClientConnection()] This function shouldn't be called from the client. Make sure that it isn't!", debug.traceback())
 		return
 	end
 
 	if Type == "REMOTE_FUNCTION" or Type == "BINDABLE_EVENT" then
-		warn(`[Dysconnect:FireAllClientConnection()] Event of type {Type} cannot be fired to every client at once!`, debug.traceback())
+		warn(`[Dysconnect.FireAllClientConnection()] Event of type {Type} cannot be fired to every client at once!`, debug.traceback())
 		return
 	end
 
 	const instance = Instances[Type] :: RemoteEvent --[[ | UnreliableRemoteEvent ]]
 	if not instance then
-		warn(`[Dysconnect:FireAllClientConnection()] Event {name} couldn't be fired because it doesn't exist! Are you sure you're connecting it to anything?`, debug.traceback())
+		warn(`[Dysconnect.FireAllClientConnection()] Event {name} couldn't be fired because it doesn't exist! Are you sure you're connecting it to anything?`, debug.traceback())
 		return
 	end
 
@@ -739,32 +824,32 @@ end
 	Fires a connection on the server.
 	
 	@param name string -- The name of the desired event / function.
-	@param Type string -- The type of instance to fire the connections of.
+	@param Type InvokableType -- The type of instance to fire the connections of.
 	@param ... any -- Any arguments to pass to the event.
 	
 	@return any | nil -- If a [RemoteFunction] is invoked using this, its returned values will be returned here.
 ]=]
-function Dysconnect.FireServerConnection(name: string, Type: "REMOTE_EVENT" | "UREMOTE_EVENT" | "REMOTE_FUNCTION", ...): any | nil
+function Dysconnect.FireServerConnection(name: string, Type: InvokableType, ...): any | nil
 	if not name then
-		warn(`[Dysconnect:FireServerConnection()] No name was provided for the event!`, debug.traceback())
+		warn(`[Dysconnect.FireServerConnection()] No name was provided for the event!`, debug.traceback())
 		return
 	end
 
 	if #name > 127 then
-		warn(`[Dysconnect:FireServerConnection()] Can't fire connection with name "{name}" because it's too long! Try to shorten it a bit.`)
+		warn(`[Dysconnect.FireServerConnection()] Can't fire connection with name "{name}" because it's too long! Try to shorten it a bit.`)
 		return
 	end
 
 	Dysconnect.WaitForInit()
 
 	if IS_SERVER then
-		warn("[Dysconnect:FireServerConnection()] This function shouldn't be called from the server. Make sure that it isn't!", debug.traceback())
+		warn("[Dysconnect.FireServerConnection()] This function shouldn't be called from the server. Make sure that it isn't!", debug.traceback())
 		return
 	end
 
 	const instance = Instances[Type]
 	if not instance then
-		warn(`[Dysconnect:FireServerConnection()] Event {name} couldn't be fired because it doesn't exist! Are you sure you're spelling the type correctly? ({Type})`, debug.traceback())
+		warn(`[Dysconnect.FireServerConnection()] Event {name} couldn't be fired because it doesn't exist! Are you sure you're spelling the type correctly? ({Type})`, debug.traceback())
 		return
 	end
 
@@ -802,12 +887,12 @@ end
 ]=]
 function Dysconnect.FireConnection(name: string, ...)
 	if not name then
-		warn(`[Dysconnect:FireConnection()] No name was provided for the event!`, debug.traceback())
+		warn(`[Dysconnect.FireConnection()] No name was provided for the event!`, debug.traceback())
 		return
 	end
 
 	if #name > 127 then
-		warn(`[Dysconnect:FireConnection()] Can't fire connection with name "{name}" because it's too long! Try to shorten it a bit.`)
+		warn(`[Dysconnect.FireConnection()] Can't fire connection with name "{name}" because it's too long! Try to shorten it a bit.`)
 		return
 	end
 
@@ -816,7 +901,7 @@ function Dysconnect.FireConnection(name: string, ...)
 	const Bindable = Instances["BINDABLE_EVENT"] :: BindableEvent
 	if not Bindable then
 		warn(
-			`[Dysconnect:FireServerConnection()] Event {name} couldn't be fired because the main BindableEvent instance is missing! Are you sure the module is initializing properly?`,
+			`[Dysconnect.FireServerConnection()] Event {name} couldn't be fired because the main BindableEvent instance is missing! Are you sure the module is initializing properly?`,
 			debug.traceback()
 		)
 		return
