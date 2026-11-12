@@ -310,7 +310,7 @@ local EXHAUSTION_DETECTION = table.freeze({
 	.MaxBatchSize number -- The maximum packet size of a single frame's batch, in KB.
 ]=]
 local BATCHING = table.freeze({
-	BatchByDefault = false,
+	BatchByDefault = true,
 	MaxBatchSize = 16, --KB
 })
 
@@ -837,7 +837,7 @@ const function OnRemoteEventPacket(Player: Player?, Args: { any }, Type: Network
 				const NameLength = #Entry.EventName
 				const ArgsLength = math.max(0, BufferLength - NameLength)
 				print(
-					`[Dysconnect (DEBUG)] Received event of type "{Type}" with name "{Name}" and a size of {BufferLength} bytes ({NameLength} bytes for the name, {ArgsLength} bytes for the arguments{InstanceCount > 0 and `, with a total of {InstanceCount} instance{InstanceCount > 1 and "s" or ""}.` or ")."}`
+					`[Dysconnect (DEBUG)] Received event of type "{Type}" with name "{Entry.EventName}" and a size of {BufferLength} bytes ({NameLength} bytes for the name, {ArgsLength} bytes for the arguments{InstanceCount > 0 and `, with a total of {InstanceCount} instance{InstanceCount > 1 and "s" or ""}.` or ")."}`
 				)
 			end
 
@@ -1104,12 +1104,10 @@ function Dysconnect.SetConnection(name: string, Type: EventType, Callback: Callb
 	}, Connection) :: Connection
 end
 
-const function AddToQueue(player: (Player | { Player } | "All")?, name: string, Type: RemoteType, ...)
+const function AddToQueue(player: (Player | { Player } | "All")?, name: string, Type: RemoteType, Args: Args)
 	if DEBUG.SentPackets then
 		print(`[Dysconnect (DEBUG)] Added event of type "{Type}" with name {name} to batch queue.\n{debug.traceback()}`)
 	end
-
-	const Args = { ... } :: Args
 
 	if typeof(player) == "table" then
 		for _, Target in player do
