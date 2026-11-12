@@ -179,10 +179,72 @@ const NAMING_EQUIVALENTS = table.freeze({
 	REMOTE_FUNCTION = "RemoteFunction",
 	UREMOTE_EVENT = "UnreliableRemoteEvent",
 	BINDABLE_EVENT = "BindableEvent",
-}) :: { [string]: string }
-const Instances = {}
+}) :: typeof(table.freeze({} :: { [EventType]: string }))
+const Instances = {} :: { [EventType]: Instance }
+
+--[=[
+	@interface BatchPacket
+	@within Dysconnect
+	@private
+	
+	Queued packet for batching in a frame.
+	
+	.EventName string -- The name of the target event.
+	.EventType RemoteType -- The type of event to fire.
+	.Args { [number]: any } -- The arguments to pass to the event.
+]=]
+type BatchPacket = {
+	EventName: string,
+	EventType: RemoteType,
+	Args: { [number]: any },
+}
+--[=[
+	@interface TargetedBatchPacket
+	@within Dysconnect
+	@private
+	
+	Queued packet for batching in a frame, targeted to one or more [Player]s.
+	
+	.Base BatchPacket -- Contains all fields from [BatchPacket]. This doesn't mean this has a field called "Base".
+	.Target (Player | { Player })? -- The player/s to fire the event to.
+]=]
+type TargetedBatchPacket = BatchPacket & {
+	Target: (Player | { Player } | "All")?,
+}
+
+const BatchQueue = {} :: { [number]: TargetedBatchPacket }
 
 local ServiceLive = false
+
+--[=[
+	@interface FireOptions
+	@within Dysconnect
+	
+	Options for a specific remote call.
+	
+	.Batch boolean? -- If this remote call will be batch. Overrides [BATCHING.BatchByDefault].
+]=]
+type FireOptions = {
+	Batch: boolean?,
+}
+type BuiltFireOptions = FireOptions & {
+	__DysconnectFireOptions: true,
+}
+--[=[
+	@within Dysconnect
+	
+	Makes a [FireOptions] table for usage in a remote call
+	This should be used instead of directly making a table as this adds a custom header to identify
+	that these are [FireOptions].
+	
+	@param Options FireOptions -- The options to apply to it.
+	@return FireOptions -- The [FireOptions] to use, with a custom header.
+]=]
+function Dysconnect.FireOptions(Options: FireOptions): typeof(table.freeze({} :: BuiltFireOptions))
+	--type casting it here so i don't have to make a different table for it while keeping it strict
+	(Options :: BuiltFireOptions).__DysconnectFireOptions = true
+	return table.freeze(Options)
+end
 
 --[=[
 	@interface DEBUG
@@ -193,6 +255,7 @@ local ServiceLive = false
 	
 	Modifiable in the network script or in [Dysconnect.Init].	
 	
+	.QueuedPackets boolean -- Prints info whenever a packet is added to the batch queue (including name, type and size in bytes).
 	.ReceivedPackets boolean -- Prints info whenever a packet is received on either side (including name, type and size in bytes).
 	.SentPackets boolean -- Prints info whenever a packet is sent from either side (including name and type).
 	.RateLimitExceeded boolean -- Prints info whenever a [Player] exceeds its rate limit, thus dropping the packets it sends (includes name and [Player.UserId]).
@@ -200,6 +263,7 @@ local ServiceLive = false
 	.Strict boolean -- Prints a warn if an object of a type not supported by Dysconnect is trying to be sent over the network, falling back to JSON.
 ]=]
 local DEBUG = table.freeze({
+	QueuedPackets = true,
 	ReceivedPackets = true,
 	SentPackets = false,
 	RateLimitExceeded = true,
@@ -225,6 +289,25 @@ local EXHAUSTION_DETECTION = table.freeze({
 	RateLimit = 50,
 	RateDropPerSecond = 18,
 	URemoteEventRateIncreaseMult = 0,
+})
+--[=[
+	@interface BATCHING
+	@within Dysconnect
+	@private
+	
+	Configuration for event batching, to not fire a lot of remote calls in a single frame.
+	Limited at a batch size cap in KB to not produce lag spikes every time a big event
+	with a lot of remote calls fires in a single frame, equivalent to firing a LOT of remotes
+	in the same timespan, which is an issue.
+	
+	Modifiable in the network script or in [Dysconnect.Init].
+	
+	.BatchByDefault boolean -- If remote calls will be batched by default, since you might not want this sometimes.
+	.MaxBatchSize number -- The maximum packet size of a single frame's batch, in KB.
+]=]
+local BATCHING = table.freeze({
+	BatchByDefault = false,
+	MaxBatchSize = 16, --KB
 })
 
 const function WriteMissingTableValues<T, S>(Target: T & {}, Values: S & {}): T & S & {}
@@ -273,6 +356,37 @@ end
 
 const function UnpackArgTable(ArgTable: { [any]: any }): ...any
 	return table.unpack(ArgTable, 1, ArgTable.n)
+end
+
+const function ExtractFireOptions(Args: { [any]: any }): (boolean, Args?)
+	const n = Args.n :: number
+	if not n or n <= 0 then
+		return BATCHING.BatchByDefault, Args
+	end
+	
+	const options = Args[n] :: BuiltFireOptions
+	if typeof(options) ~= "table" or not options.__DysconnectFireOptions then
+		return BATCHING.BatchByDefault, Args
+	end
+
+	const batch: boolean =
+		if options.Batch ~= nil then
+			options.Batch
+		else
+			BATCHING.BatchByDefault
+
+	if not batch then
+		return false, nil
+	end
+
+	--this seems like an unnecessary first approach
+	-- const Clean = table.create(n - 1)
+	-- for i = 1, n - 1 do
+	-- 	Clean[i] = Args[i]
+	-- end
+	const Clean = table.clone(Args)
+	Clean[n] = nil
+	return true, Clean
 end
 
 type Args = {
@@ -412,6 +526,134 @@ const function UnpackArgumentsFromNetwork(Arguments: { any }): (string, { [any]:
 	return Name, Unpacked, Unpacked.n, #InstanceList
 end
 
+const function Fire(player: Player, event: RemoteEvent | UnreliableRemoteEvent | RemoteFunction, name: string, Type: InvokableType, ...): ...any
+	if DEBUG.SentPackets then
+		print(`[Dysconnect (DEBUG)] Fired event of type "{Type}" with name "{name}".\n{debug.traceback()}`)
+	end
+
+	if Type == "REMOTE_FUNCTION" then
+		const Results = (event :: RemoteFunction):InvokeClient(player, ...)
+
+		if DEBUG.ReceivedPackets then
+			const BufferLength = Results[1] and typeof(Results[1]) == "buffer" and buffer.len(Results[1]) or 0
+			print(`[Dysconnect (DEBUG)] Received back results from a "REMOTE_FUNCTION" with name "{name}" and a size of {BufferLength} bytes.`)
+		end
+
+		const _, DecompressedResults, ArgCount = UnpackArgumentsFromNetwork(Results)
+		return UnpackArgTable(DecompressedResults, ArgCount)
+	else
+		(event :: RemoteEvent --[[ | UnreliableRemoteEvent ]]):FireClient(player, ...)
+	end
+	return
+end
+
+const function ReceiveQueuedCalls(Player: Player?, name: string, Type: RemoteType, ...)
+	const CallbackList = Connections[Type][name]
+	if not CallbackList then
+		return
+	end
+
+	for callback, meta in CallbackList do
+		const ServerCheck = Type ~= "BINDABLE_EVENT" and IS_SERVER
+
+		if meta.Predicate then
+			const Valid =
+				if ServerCheck then
+					(meta.Predicate :: (Player: Player, ...any) -> boolean)(Player :: Player, ...)
+				else
+					(meta.Predicate :: (...any) -> boolean)(...)
+
+			if not Valid then
+				continue
+			end
+		end
+
+		if ServerCheck then
+			task.spawn(callback, Player :: Player, ...)
+		else
+			task.spawn(callback, ...)
+		end
+	end
+end
+
+const function GetSizeOfEvent(name: string, Args: { any }): number
+	local Size = #name
+	for _, Arg in Args do
+		-- + 1 for tag
+		Size += 1 + DataTypes.GetPayloadSize(DataTypes.GetTagFromValue(Arg), Arg)
+	end
+	return Size
+end
+
+const function FireQueuedCalls()
+	if #BatchQueue == 0 then
+		return
+	end
+
+	const SelectedCalls = {
+		REMOTE_EVENT = {},
+		UREMOTE_EVENT = {},
+	} :: { [RemoteType]: { [Player | "All" | "Server"]: { BatchPacket } } }
+	local AccumulatedSizes = {
+		REMOTE_EVENT = 0,
+		UREMOTE_EVENT = 0,
+	} :: { [string]: number }
+	local LastIndex = 0
+	for Index, Event in BatchQueue do
+		const BufferLength = GetSizeOfEvent(Event.EventName, Event.Args)
+		const EventType = Event.EventType
+
+		if AccumulatedSizes[EventType] > BATCHING.MaxBatchSize then
+			break
+		end
+
+		AccumulatedSizes[EventType] += BufferLength / 1024
+		if AccumulatedSizes[EventType] > BATCHING.MaxBatchSize then
+			break
+		end
+		
+		LastIndex = Index
+		const Calls = SelectedCalls[EventType]
+		local CallGroup: { BatchPacket }
+		if Event.Target == nil then
+			if Calls.Server == nil then
+				Calls.Server = {}
+			end
+			CallGroup = Calls.Server
+		elseif typeof(Event.Target) == "table" then
+			for _, Target in Event.Target do
+				if Calls[Target] == nil then
+					Calls[Target] = {}
+				end
+				CallGroup = Calls[Target]
+			end
+		else
+			if Calls[Event.Target] == nil then
+				Calls[Event.Target] = {}
+			end
+			CallGroup = Calls[Event.Target]
+		end
+		table.insert(CallGroup, Event)
+		Event.Target = nil
+	end
+	for index = LastIndex, 1, -1 do
+		table.remove(BatchQueue, index)
+	end
+
+	table.clear(AccumulatedSizes) --clean this, why not?
+
+	for Type, CallGroup in SelectedCalls do
+		const event = Instances[Type]
+		if not event then
+			continue
+		end
+
+		for Target, Events in CallGroup do
+			--TODO: fire this.
+		end
+	end
+end
+
 const function OnRemoteEventPacket(Player: Player?, Args: { any }, Type: NetworkEventType)
 	--safety first gng
 	if IS_SERVER and not Player then
@@ -419,6 +661,13 @@ const function OnRemoteEventPacket(Player: Player?, Args: { any }, Type: Network
 	end
 
 	const Name, DecodedArgs, _ArgCount, InstanceCount = UnpackArgumentsFromNetwork(Args)
+
+	if Name == "__Batch" then
+		
+		ReceiveQueuedCalls(Player, Name, Type :: RemoteType, UnpackArgTable(DecodedArgs))
+
+		return
+	end
 
 	if DEBUG.ReceivedPackets and (Type ~= "UREMOTE_EVENT" or not DEBUG.ExcludeUnreliable) then
 		const BufferLength = Args[1] and typeof(Args[1]) == "buffer" and buffer.len(Args[1]) or #Name
@@ -614,23 +863,42 @@ const function ClientInit()
 end
 
 --[=[
+	@interface InitConfig
+	@within Dysconnect
+	
+	Configurations to apply to the network service when initializing.
+	
+	.DebugConfig DEBUG -- Read [DEBUG].
+	.ExhaustionDetectionConfig EXHAUSTION_DETECTION -- Read [EXHAUSTION_DETECTION].
+	.Batching BATCHING -- Read [BATCHING].
+]=]
+type InitConfig = {
+	DebugConfig: typeof(DEBUG)?,
+	ExhaustionDetectionConfig: typeof(EXHAUSTION_DETECTION)?,
+	Batching: typeof(BATCHING)?,
+}
+--[=[
 	@within Dysconnect
 	
 	Initializes the networking system in the current environment.
 	
-	@param DebugConfig DEBUG? -- Read [DEBUG].
-	@param ExhaustionDetectionConfig EXHAUSTION_DETECTION? -- Read [EXHAUSTION_DETECTION].
+	@param config InitConfig -- Read [InitConfig].
 ]=]
-function Dysconnect.Init(DebugConfig: typeof(DEBUG)?, ExhaustionDetectionConfig: typeof(EXHAUSTION_DETECTION)?)
+function Dysconnect.Init(config: InitConfig?)
 	for Name, _ in NAMING_EQUIVALENTS do
 		Connections[Name :: EventType] = {}
 	end
 	
-	if DebugConfig then
-		DEBUG = table.freeze(WriteMissingTableValues(DebugConfig, DEBUG))
-	end
-	if ExhaustionDetectionConfig then
-		EXHAUSTION_DETECTION = table.freeze(WriteMissingTableValues(ExhaustionDetectionConfig, EXHAUSTION_DETECTION))
+	if config then
+		if config.DebugConfig then
+			DEBUG = table.freeze(WriteMissingTableValues(config.DebugConfig, DEBUG))
+		end
+		if config.ExhaustionDetectionConfig then
+			EXHAUSTION_DETECTION = table.freeze(WriteMissingTableValues(config.ExhaustionDetectionConfig, EXHAUSTION_DETECTION))
+		end
+		if config.Batching then
+			BATCHING = table.freeze(WriteMissingTableValues(config.Batching, BATCHING))
+		end
 	end
 
 	if IS_SERVER then
@@ -638,6 +906,8 @@ function Dysconnect.Init(DebugConfig: typeof(DEBUG)?, ExhaustionDetectionConfig:
 	else
 		ClientInit()
 	end
+
+	RunService.PostSimulation:Connect(FireQueuedCalls)
 
 	ServiceLive = true
 end
@@ -691,25 +961,17 @@ function Dysconnect.SetConnection(
 	}, Connection) :: Connection
 end
 
-const function Fire(player: Player, event: RemoteEvent | UnreliableRemoteEvent | RemoteFunction, name: string, Type: InvokableType, ...)
+const function AddToQueue(player: (Player | { Player } | "All")?, name: string, Type: RemoteType, ...)
 	if DEBUG.SentPackets then
-		print(`[Dysconnect (DEBUG)] Fired event of type "{Type}" with name "{name}".\n{debug.traceback()}`)
+		print(`[Dysconnect (DEBUG)] Added event of type "{Type}" with name {name} to batch queue.\n{debug.traceback()}`)
 	end
 
-	if Type == "REMOTE_FUNCTION" then
-		const Results = (event :: RemoteFunction):InvokeClient(player, ...)
-
-		if DEBUG.ReceivedPackets then
-			const BufferLength = Results[1] and typeof(Results[1]) == "buffer" and buffer.len(Results[1]) or 0
-			print(`[Dysconnect (DEBUG)] Received back results from a "REMOTE_FUNCTION" with name "{name}" and a size of {BufferLength} bytes.`)
-		end
-
-		const _, DecompressedResults, ArgCount = UnpackArgumentsFromNetwork(Results)
-		return UnpackArgTable(DecompressedResults, ArgCount)
-	else
-		(event :: RemoteEvent --[[ | UnreliableRemoteEvent ]]):FireClient(player, ...)
-	end
-	return
+	table.insert(BatchQueue, {
+		Target = player,
+		EventName = name,
+		EventType = Type,
+		Args = {...},
+	})
 end
 
 --[=[
@@ -754,7 +1016,14 @@ function Dysconnect.FireClientConnection(target: Player | { Player }, name: stri
 		return
 	end
 
-	const Arguments = table.pack(...)
+	const Arguments = table.pack(...) --using table.pack() to add `Arguments.n`
+
+	const ShouldBatch, CleanArgs = ExtractFireOptions(Arguments)
+	if ShouldBatch then
+		AddToQueue(target, name, Type :: RemoteType, CleanArgs :: Args)
+		return
+	end
+
 	const CompressedArguments = PackArgumentsForNetwork(name, Arguments)
 
 	if typeof(target) == "table" then
@@ -808,13 +1077,18 @@ function Dysconnect.FireAllClientConnection(name: string, Type: RemoteType, ...)
 	end
 
 	const Arguments = table.pack(...)
-	const CompressedArguments = PackArgumentsForNetwork(name, Arguments)
+
+	const ShouldBatch, CleanArgs = ExtractFireOptions(Arguments)
+	if ShouldBatch then
+		AddToQueue("All", name, Type, CleanArgs :: Args)
+		return
+	end
+
+	instance:FireAllClients(PackArgumentsForNetwork(name, Arguments))
 
 	if DEBUG.SentPackets then
 		print(`[Dysconnect (DEBUG)] Fired event of type "{Type}" with name "{name}".\n{debug.traceback()}`)
 	end
-
-	instance:FireAllClients(CompressedArguments)
 end
 
 --[=[
@@ -854,14 +1128,13 @@ function Dysconnect.FireServerConnection(name: string, Type: InvokableType, ...)
 	end
 
 	const Arguments = table.pack(...)
-	const CompressedArguments = PackArgumentsForNetwork(name, Arguments)
-
-	if DEBUG.SentPackets then
-		print(`[Dysconnect (DEBUG)] Fired event of type "{Type}" with name "{name}".\n{debug.traceback()}`)
-	end
 
 	if Type == "REMOTE_FUNCTION" then
-		const Results = (instance :: RemoteFunction):InvokeServer(CompressedArguments)
+		if DEBUG.SentPackets then
+			print(`[Dysconnect (DEBUG)] Fired event of type "REMOTE_FUNCTION" with name "{name}".\n{debug.traceback()}`)
+		end
+
+		const Results = (instance :: RemoteFunction):InvokeServer(PackArgumentsForNetwork(name, Arguments))
 
 		if DEBUG.ReceivedPackets then
 			const BufferLength = Results[1] and typeof(Results[1]) == "buffer" and buffer.len(Results[1]) or 0
@@ -869,10 +1142,17 @@ function Dysconnect.FireServerConnection(name: string, Type: InvokableType, ...)
 		end
 
 		const _, DecompressedResults, ArgCount = UnpackArgumentsFromNetwork(Results)
+
 		return UnpackArgTable(DecompressedResults, ArgCount)
 	end
 
-	(instance :: RemoteEvent --[[ | UnreliableRemoteEvent ]]):FireServer(CompressedArguments)
+	const ShouldBatch, CleanArgs = ExtractFireOptions(Arguments)
+	if ShouldBatch then
+		AddToQueue(nil, name, Type, CleanArgs :: Args)
+		return
+	end
+
+	(instance :: RemoteEvent --[[ | UnreliableRemoteEvent ]]):FireServer(PackArgumentsForNetwork(name, Arguments))
 
 	return
 end
