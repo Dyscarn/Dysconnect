@@ -113,7 +113,7 @@ const Connections = {} :: {
 			Predicate: Predicate?,
 			[Callback]: {
 				Predicate: Predicate?,
-			}?
+			}?,
 		},
 	},
 }
@@ -136,15 +136,18 @@ Connection.__index = Connection
 	.Name string -- The name of the event it's connected to.
 	.Callback Callback -- The callback that'll execute when this connection receives a signal.
 ]=]
-type Connection = typeof(setmetatable({} :: {
-	Connected: boolean,
-	Type: EventType,
-	Name: string,
-	Callback: Callback,
-}, {} :: {
-	Disconnect: (self: Connection) -> (),
-	Destroy: (self: Connection) -> (),
-}))
+type Connection = typeof(setmetatable(
+	{} :: {
+		Connected: boolean,
+		Type: EventType,
+		Name: string,
+		Callback: Callback,
+	},
+	{} :: {
+		Disconnect: (self: Connection) -> (),
+		Destroy: (self: Connection) -> (),
+	}
+))
 
 --[=[
 	@within Connection
@@ -190,13 +193,11 @@ const Instances = {} :: { [EventType]: Instance }
 	Queued packet for batching in a frame.
 	
 	.EventName string -- The name of the target event.
-	.EventType RemoteType -- The type of event to fire.
 	.Args { [number]: any } -- The arguments to pass to the event.
 ]=]
 type BatchPacket = {
 	EventName: string,
-	EventType: RemoteType,
-	Args: { [number]: any },
+	Args: Args,
 }
 --[=[
 	@interface TargetedBatchPacket
@@ -206,13 +207,16 @@ type BatchPacket = {
 	Queued packet for batching in a frame, targeted to one or more [Player]s.
 	
 	.Base BatchPacket -- Contains all fields from [BatchPacket]. This doesn't mean this has a field called "Base".
+	.EventType RemoteType -- The type of event to fire.
 	.Target (Player | { Player })? -- The player/s to fire the event to.
 ]=]
 type TargetedBatchPacket = BatchPacket & {
-	Target: (Player | { Player } | "All")?,
+	Target: (Player | "All")?,
+	EventType: RemoteType,
 }
+type ReceivedBatchPacket = BatchPacket
 
-const BatchQueue = {} :: { [number]: TargetedBatchPacket }
+const BatchQueue = {} :: { TargetedBatchPacket }
 
 local ServiceLive = false
 
@@ -311,14 +315,14 @@ local BATCHING = table.freeze({
 })
 
 const function WriteMissingTableValues<T, S>(Target: T & {}, Values: S & {}): T & S & {}
-	for Key, Value in Values :: {[any]: any} do
+	for Key, Value in Values :: { [any]: any } do
 		if Target[Key] ~= nil then
 			continue
 		end
-		
+
 		Target[Key] = Value
 	end
-	
+
 	return Target
 end
 
@@ -363,17 +367,13 @@ const function ExtractFireOptions(Args: { [any]: any }): (boolean, Args?)
 	if not n or n <= 0 then
 		return BATCHING.BatchByDefault, Args
 	end
-	
+
 	const options = Args[n] :: BuiltFireOptions
 	if typeof(options) ~= "table" or not options.__DysconnectFireOptions then
 		return BATCHING.BatchByDefault, Args
 	end
 
-	const batch: boolean =
-		if options.Batch ~= nil then
-			options.Batch
-		else
-			BATCHING.BatchByDefault
+	const batch: boolean = if options.Batch ~= nil then options.Batch else BATCHING.BatchByDefault
 
 	if not batch then
 		return false, nil
@@ -400,11 +400,13 @@ const function PackArgumentsForNetwork(Name: string, Arguments: Args): { any }
 
 	--calculate the total size of the buffer
 	local TotalSize = 2 + #Name --1 for string length, 1 for arg length and the length itself
-	const PreparedArgs = {} :: {{
-		Tag: number,
-		Value: any,
-		Size: number,
-	}} --param cache
+	const PreparedArgs = {} :: {
+		{
+			Tag: number,
+			Value: any,
+			Size: number,
+		}
+	} --param cache
 	const InstanceList = {} --instance cache
 
 	for i = 1, Arguments.n do
@@ -547,7 +549,135 @@ const function Fire(player: Player, event: RemoteEvent | UnreliableRemoteEvent |
 	return
 end
 
-const function ReceiveQueuedCalls(Player: Player?, name: string, Type: RemoteType, ...)
+const function PackBatchEnvelope(Entries: { BatchPacket }): (buffer, { Instance })
+	const EntryCount = #Entries
+	local TotalSize = 4
+
+	const InstanceList = {} :: { Instance }
+	const InstanceMap = {} :: { [Instance]: number }
+
+	const Prepared = {} :: {
+		{
+			Name: string,
+			Args: { { Tag: number, Value: any, Size: number } },
+			Size: number,
+			Offset: number,
+		}
+	}
+
+	for _, Entry in Entries do
+		TotalSize += 4 + #Entry.EventName
+
+		const EntryArgs = {} :: { { Tag: number, Value: any, Size: number } }
+		local EntrySize = 0
+
+		for i = 1, Entry.Args.n do
+			const Value = Entry.Args[i]
+			const Tag = DataTypes.GetTagFromValue(Value)
+
+			if Tag == DataTypes.Enum.Instance then
+				if not InstanceMap[Value] then
+					table.insert(InstanceList, Value)
+					InstanceMap[Value] = #InstanceList
+				end
+			end
+
+			const PayloadSize = DataTypes.GetPayloadSize(Tag, Value)
+			EntrySize += 1 + PayloadSize
+
+			table.insert(EntryArgs, {
+				Tag = Tag,
+				Value = Value,
+				Size = PayloadSize,
+			})
+		end
+
+		TotalSize += EntrySize
+
+		table.insert(Prepared, {
+			Name = Entry.EventName,
+			Args = EntryArgs,
+			Size = EntrySize,
+			Offset = 0,
+		})
+	end
+
+	const Buffer = buffer.create(TotalSize)
+	local Offset = 0
+
+	buffer.writeu16(Buffer, Offset, EntryCount)
+	Offset += 2
+	buffer.writeu16(Buffer, Offset, #InstanceList)
+	Offset += 2
+
+	for _, Payload in Prepared do
+		Payload.Offset = Offset
+
+		buffer.writeu8(Buffer, Offset, #Payload.Name)
+		Offset += 1
+		buffer.writestring(Buffer, Offset, Payload.Name)
+		Offset += #Payload.Name
+
+		buffer.writeu8(Buffer, Offset, #Payload.Args)
+		Offset += 1
+
+		buffer.writeu16(Buffer, Offset, Payload.Size)
+		Offset += 2
+
+		for _, Arg in Payload.Args do
+			buffer.writeu8(Buffer, Offset, Arg.Tag)
+			Offset += 1
+			Offset = DataTypes.Writers[Arg.Tag](Buffer, Offset, Arg.Value, InstanceList)
+		end
+	end
+
+	return Buffer, InstanceList
+end
+
+const function UnpackBatchEnvelope(Buffer: buffer, InstanceList: { Instance }): { ReceivedBatchPacket }
+	local Offset = 0
+
+	const EntryCount = buffer.readu16(Buffer, Offset)
+	Offset += 2
+	const _InstanceCount = buffer.readu16(Buffer, Offset)
+	Offset += 2
+
+	const Entries = {} :: { ReceivedBatchPacket }
+
+	for _ = 1, EntryCount do
+		const NameLength = buffer.readu8(Buffer, Offset)
+		Offset += 1
+		const Name = buffer.readstring(Buffer, Offset, NameLength)
+		Offset += NameLength
+
+		const ArgCount = buffer.readu8(Buffer, Offset)
+		Offset += 1
+		const EntrySize = buffer.readu16(Buffer, Offset)
+		Offset += 2
+
+		const Args = table.create(ArgCount) :: Args
+		Args.n = ArgCount
+
+		for i = 1, ArgCount do
+			const Tag = buffer.readu8(Buffer, Offset)
+			Offset += 1
+			const Value, NewOffset = DataTypes.Readers[Tag](Buffer, Offset, InstanceList)
+			Args[i] = Value
+			Offset = NewOffset
+		end
+
+		table.insert(Entries, {
+			EventName = Name,
+			EventType = nil,
+			Args = Args,
+			Size = EntrySize,
+		})
+	end
+
+	return Entries
+end
+
+const function ReceiveCall(Player: Player?, name: string, Type: NetworkEventType, ...)
 	const CallbackList = Connections[Type][name]
 	if not CallbackList then
 		return
@@ -557,11 +687,7 @@ const function ReceiveQueuedCalls(Player: Player?, name: string, Type: RemoteTyp
 		const ServerCheck = Type ~= "BINDABLE_EVENT" and IS_SERVER
 
 		if meta.Predicate then
-			const Valid =
-				if ServerCheck then
-					(meta.Predicate :: (Player: Player, ...any) -> boolean)(Player :: Player, ...)
-				else
-					(meta.Predicate :: (...any) -> boolean)(...)
+			const Valid = if ServerCheck then (meta.Predicate :: (Player: Player, ...any) -> boolean)(Player :: Player, ...) else (meta.Predicate :: (...any) -> boolean)(...)
 
 			if not Valid then
 				continue
@@ -576,9 +702,10 @@ const function ReceiveQueuedCalls(Player: Player?, name: string, Type: RemoteTyp
 	end
 end
 
-const function GetSizeOfEvent(name: string, Args: { any }): number
-	local Size = #name
-	for _, Arg in Args do
+const function GetSizeOfBatchEvent(name: string, Args: Args): number
+	local Size = 4 + #name
+	for i = 1, Args.n do
+		const Arg = Args[i]
 		-- + 1 for tag
 		Size += 1 + DataTypes.GetPayloadSize(DataTypes.GetTagFromValue(Arg), Arg)
 	end
@@ -595,61 +722,93 @@ const function FireQueuedCalls()
 		UREMOTE_EVENT = {},
 	} :: { [RemoteType]: { [Player | "All" | "Server"]: { BatchPacket } } }
 	local AccumulatedSizes = {
-		REMOTE_EVENT = 0,
-		UREMOTE_EVENT = 0,
-	} :: { [string]: number }
-	local LastIndex = 0
+		REMOTE_EVENT = {},
+		UREMOTE_EVENT = {},
+	} :: { [RemoteType]: { [Player | "All" | "Server"]: number } }
+	const IndexesToRemove = {} :: { number }
 	for Index, Event in BatchQueue do
-		const BufferLength = GetSizeOfEvent(Event.EventName, Event.Args)
+		const BufferLength = GetSizeOfBatchEvent(Event.EventName, Event.Args)
 		const EventType = Event.EventType
+		const EventTarget = Event.Target or "Server"
 
-		if AccumulatedSizes[EventType] > BATCHING.MaxBatchSize then
-			break
+		const ExistingAccumulated = AccumulatedSizes[EventType][EventTarget]
+		if ExistingAccumulated and ExistingAccumulated > BATCHING.MaxBatchSize then
+			continue
 		end
 
-		AccumulatedSizes[EventType] += BufferLength / 1024
-		if AccumulatedSizes[EventType] > BATCHING.MaxBatchSize then
-			break
+		const Size = BufferLength / 1024
+		--if the size of the call args is already bigger than the max limit, just send it immediately
+		if Size >= BATCHING.MaxBatchSize then
+			--only remove it from queue if it's bigger than the cap or if it's sent
+			table.insert(IndexesToRemove, Index)
+			-- gotta add FireOptions here so it doesn't try to batch it again at all,
+			-- which would make an infinite loop of doom and despair
+			const Options = Dysconnect.FireOptions({ Batch = false })
+			if Event.Target == "Server" then
+				if not IS_SERVER then
+					Dysconnect.FireServerConnection(Event.EventName, EventType, table.unpack(Event.Args), Options)
+				end
+			elseif IS_SERVER then
+				if Event.Target == "All" then
+					Dysconnect.FireAllClientConnection(Event.EventName, EventType, table.unpack(Event.Args), Options)
+				else
+					Dysconnect.FireClientConnection(EventTarget :: Player, Event.EventName, EventType, table.unpack(Event.Args), Options)
+				end
+			end
+			continue
 		end
-		
-		LastIndex = Index
+		--if adding the event would exceed the cap, but the event isn't bigger than or as big as the cap, skip it
+		if ExistingAccumulated and ExistingAccumulated + Size > BATCHING.MaxBatchSize then
+			continue
+		end
+
+		--only remove it from queue if it's bigger than the cap or if it's sent
+		table.insert(IndexesToRemove, Index)
+		if ExistingAccumulated == nil then
+			AccumulatedSizes[EventType][EventTarget] = BufferLength / 1024
+		else
+			AccumulatedSizes[EventType][EventTarget] += BufferLength / 1024
+		end
+
 		const Calls = SelectedCalls[EventType]
 		local CallGroup: { BatchPacket }
-		if Event.Target == nil then
-			if Calls.Server == nil then
-				Calls.Server = {}
-			end
-			CallGroup = Calls.Server
-		elseif typeof(Event.Target) == "table" then
-			for _, Target in Event.Target do
-				if Calls[Target] == nil then
-					Calls[Target] = {}
-				end
-				CallGroup = Calls[Target]
-			end
-		else
-			if Calls[Event.Target] == nil then
-				Calls[Event.Target] = {}
-			end
-			CallGroup = Calls[Event.Target]
+		if Calls[EventTarget] == nil then
+			Calls[EventTarget] = {}
 		end
-		table.insert(CallGroup, Event)
-		Event.Target = nil
+		CallGroup = Calls[EventTarget]
+		table.insert(CallGroup, Event :: BatchPacket)
 	end
-	for index = LastIndex, 1, -1 do
-		table.remove(BatchQueue, index)
+	for index = #IndexesToRemove, 1, -1 do
+		table.remove(BatchQueue, IndexesToRemove[index])
 	end
+	table.clear(IndexesToRemove)
 
-	table.clear(AccumulatedSizes) --clean this, why not?
+	for _, Group in AccumulatedSizes do --clean this, why not?
+		table.clear(Group)
+	end
+	table.clear(AccumulatedSizes)
 
 	for Type, CallGroup in SelectedCalls do
-		const event = Instances[Type]
+		const event = Instances[Type] :: RemoteEvent --[[ | UnreliableRemoteEvent ]]
 		if not event then
 			continue
 		end
 
 		for Target, Events in CallGroup do
-			--TODO: fire this.
+			const EnvelopeBuffer, InstanceList = PackBatchEnvelope(Events)
+			-- Compressing it like this will add slight but negligible overhead
+			-- because of an attempt to serialize InstanceList and failing,
+			-- but it's not like i care enough to change it.
+			-- -dys
+			const Compressed = PackArgumentsForNetwork("__Batch", table.pack(EnvelopeBuffer, InstanceList))
+
+			if Target == "All" then
+				event:FireAllClients(Compressed)
+			elseif Target == "Server" then
+				event:FireServer(Compressed)
+			else
+				event:FireClient(Target, Compressed)
+			end
 		end
 	end
 end
@@ -663,8 +822,27 @@ const function OnRemoteEventPacket(Player: Player?, Args: { any }, Type: Network
 	const Name, DecodedArgs, _ArgCount, InstanceCount = UnpackArgumentsFromNetwork(Args)
 
 	if Name == "__Batch" then
-		
-		ReceiveQueuedCalls(Player, Name, Type :: RemoteType, UnpackArgTable(DecodedArgs))
+		if DEBUG.ReceivedPackets and (Type ~= "UREMOTE_EVENT" or not DEBUG.ExcludeUnreliable) then
+			const BufferLength = Args[1] and typeof(Args[1]) == "buffer" and buffer.len(Args[1]) or #Name
+			print(
+				`[Dysconnect (DEBUG)] Received event batch of type "{Type}" and a size of {BufferLength} bytes{InstanceCount > 0 and `, with a total of {InstanceCount} instance{InstanceCount > 1 and "s" or ""}.` or "."}`
+			)
+		end
+
+		const Entries = UnpackBatchEnvelope(DecodedArgs[1], DecodedArgs[2] or {})
+
+		for _, Entry in Entries do
+			if DEBUG.ReceivedPackets and (Type ~= "UREMOTE_EVENT" or not DEBUG.ExcludeUnreliable) then
+				const BufferLength = GetSizeOfBatchEvent(Entry.EventName, Entry.Args)
+				const NameLength = #Entry.EventName
+				const ArgsLength = math.max(0, BufferLength - NameLength)
+				print(
+					`[Dysconnect (DEBUG)] Received event of type "{Type}" with name "{Name}" and a size of {BufferLength} bytes ({NameLength} bytes for the name, {ArgsLength} bytes for the arguments{InstanceCount > 0 and `, with a total of {InstanceCount} instance{InstanceCount > 1 and "s" or ""}.` or ")."}`
+				)
+			end
+
+			ReceiveCall(Player, Entry.EventName, Type, UnpackArgTable(Entry.Args))
+		end
 
 		return
 	end
@@ -674,36 +852,11 @@ const function OnRemoteEventPacket(Player: Player?, Args: { any }, Type: Network
 		const NameLength = #Name
 		const ArgsLength = math.max(0, BufferLength - NameLength)
 		print(
-			`[Dysconnect (DEBUG)] Received event of type "{Type}" with name "{Name}" and a size of {BufferLength} bytes ({NameLength} bytes for the name, {ArgsLength} bytes for the arguments{InstanceCount > 0 and `, with a total of {InstanceCount} instance{InstanceCount > 1 and "s" or ""}` or ")."}`
+			`[Dysconnect (DEBUG)] Received event of type "{Type}" with name "{Name}" and a size of {BufferLength} bytes ({NameLength} bytes for the name, {ArgsLength} bytes for the arguments{InstanceCount > 0 and `, with a total of {InstanceCount} instance{InstanceCount > 1 and "s" or ""}.` or ")."}`
 		)
 	end
 
-	const CallbackList = Connections[Type][Name]
-	if not CallbackList then
-		return
-	end
-
-	for callback, meta in CallbackList do
-		const ServerCheck = Type ~= "BINDABLE_EVENT" and IS_SERVER
-
-		if meta.Predicate then
-			const Valid =
-				if ServerCheck then
-					(meta.Predicate :: (Player: Player, ...any) -> boolean)(Player :: Player, UnpackArgTable(DecodedArgs))
-				else
-					(meta.Predicate :: (...any) -> boolean)(UnpackArgTable(DecodedArgs))
-
-			if not Valid then
-				continue
-			end
-		end
-
-		if ServerCheck then
-			task.spawn(callback, Player :: Player, UnpackArgTable(DecodedArgs))
-		else
-			task.spawn(callback, UnpackArgTable(DecodedArgs))
-		end
-	end
+	ReceiveCall(Player, Name, Type, UnpackArgTable(DecodedArgs))
 end
 
 const function OnRemoteFunctionPacket(Player: Player?, Args: { any }): any
@@ -739,11 +892,9 @@ const function OnRemoteFunctionPacket(Player: Player?, Args: { any }): any
 	end
 
 	if Meta.Predicate then
-		const Valid =
-			if IS_SERVER then
-				(Meta.Predicate :: (Player: Player, ...any) -> boolean)(Player :: Player, UnpackArgTable(DecodedArgs))
-			else
-				(Meta.Predicate :: (...any) -> boolean)(UnpackArgTable(DecodedArgs) :: any)
+		const Valid = if IS_SERVER
+			then (Meta.Predicate :: (Player: Player, ...any) -> boolean)(Player :: Player, UnpackArgTable(DecodedArgs))
+			else (Meta.Predicate :: (...any) -> boolean)(UnpackArgTable(DecodedArgs) :: any)
 
 		if not Valid then
 			return
@@ -752,10 +903,7 @@ const function OnRemoteFunctionPacket(Player: Player?, Args: { any }): any
 
 	-- const Results = if IS_SERVER then table.pack(Meta.Callback(Player, UnpackArgTable(DecodedArgs))) else table.pack(Meta.Callback(UnpackArgTable(DecodedArgs) :: any))
 	const Results = table.pack(
-		if IS_SERVER then
-			(Meta.Callback :: (Player: Player, ...any) -> ())(Player :: Player, UnpackArgTable(DecodedArgs))
-		else
-			(Meta.Callback :: (...any) -> ())(UnpackArgTable(DecodedArgs))
+		if IS_SERVER then (Meta.Callback :: (Player: Player, ...any) -> ())(Player :: Player, UnpackArgTable(DecodedArgs)) else (Meta.Callback :: (...any) -> ())(UnpackArgTable(DecodedArgs))
 	)
 	const CompressedResults = PackArgumentsForNetwork("", Results) --using a dummy name, ignore
 
@@ -827,7 +975,7 @@ const function ServerInit()
 		--cleanup
 		PlayerExhaustionLogs[Player.UserId] = nil
 	end)
-	
+
 	print("[Dysconnect.Init()] Initialized networking on server successfully!")
 end
 
@@ -858,7 +1006,7 @@ const function ClientInit()
 			OnRemoteEventPacket(nil, Args, Name :: NetworkEventType)
 		end)
 	end
-	
+
 	print("[Dysconnect.Init()] Initialized networking on client successfully!")
 end
 
@@ -888,7 +1036,7 @@ function Dysconnect.Init(config: InitConfig?)
 	for Name, _ in NAMING_EQUIVALENTS do
 		Connections[Name :: EventType] = {}
 	end
-	
+
 	if config then
 		if config.DebugConfig then
 			DEBUG = table.freeze(WriteMissingTableValues(config.DebugConfig, DEBUG))
@@ -924,12 +1072,7 @@ end
 	
 	@return Connection -- The set connection for further usage and cleanup.
 ]=]
-function Dysconnect.SetConnection(
-	name: string,
-	Type: EventType,
-	Callback: Callback,
-	Predicate: Predicate?
-): Connection
+function Dysconnect.SetConnection(name: string, Type: EventType, Callback: Callback, Predicate: Predicate?): Connection
 	if #name > 127 then
 		warn(`[Dysconnect.SetConnection()] Can't assign connection with name "{name}" because it's too long! Try to shorten it a bit.`)
 		return {
@@ -966,11 +1109,26 @@ const function AddToQueue(player: (Player | { Player } | "All")?, name: string, 
 		print(`[Dysconnect (DEBUG)] Added event of type "{Type}" with name {name} to batch queue.\n{debug.traceback()}`)
 	end
 
+	const Args = { ... } :: Args
+
+	if typeof(player) == "table" then
+		for _, Target in player do
+			table.insert(BatchQueue, {
+				Target = Target,
+				EventName = name,
+				EventType = Type,
+				Args = Args,
+			})
+		end
+
+		return
+	end
+
 	table.insert(BatchQueue, {
 		Target = player,
 		EventName = name,
 		EventType = Type,
-		Args = {...},
+		Args = Args,
 	})
 end
 
