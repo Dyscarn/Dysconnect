@@ -1,0 +1,17 @@
+name: Selene
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  selene:
+    name: Validate Rojo project
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: CompeyDev/setup-rokit@v0.2.1
+      - run: |
+          rojo build default.project.json \
+            -o /tmp/project.rbxlx
