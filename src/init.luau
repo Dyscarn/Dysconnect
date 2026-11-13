@@ -837,7 +837,7 @@ const function OnRemoteEventPacket(Player: Player?, Args: { any }, Type: Network
 				const NameLength = #Entry.EventName
 				const ArgsLength = math.max(0, BufferLength - NameLength)
 				print(
-					`[Dysconnect (DEBUG)] Received event of type "{Type}" with name "{Entry.EventName}" and a size of {BufferLength} bytes ({NameLength} bytes for the name, {ArgsLength} bytes for the arguments{InstanceCount > 0 and `, with a total of {InstanceCount} instance{InstanceCount > 1 and "s" or ""}.` or ")."}`
+					`[Dysconnect (DEBUG)] Received batched event of type "{Type}" with name "{Entry.EventName}" and a size of {BufferLength} bytes ({NameLength} bytes for the name, {ArgsLength} bytes for the arguments{InstanceCount > 0 and `, with a total of {InstanceCount} instance{InstanceCount > 1 and "s" or ""}.` or ")."}`
 				)
 			end
 
