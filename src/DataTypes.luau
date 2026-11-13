@@ -376,6 +376,10 @@ DataTypes.Writers = {
 			TableCount += 1
 		end
 
+		if TableCount > 65535 then
+			error(`[Dysconnect] Can't send a table with {TableCount} entries! Aborting buffering... (max is 65535)`)
+		end
+
 		buffer.writeu16(Buffer, Count, TableCount) --write le count
 		Count += 2
 

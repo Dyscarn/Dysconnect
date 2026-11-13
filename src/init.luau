@@ -155,10 +155,24 @@ type Connection = typeof(setmetatable(
 	Destroys this [Connection], rendering it unusuable and setting its [Connection.Connected] property to `false`.
 ]=]
 function Connection.Disconnect(self: Connection)
-	Connections[self.Type][self.Name][self.Callback] = nil
+	if not self.Connected then
+		return
+	end
+
+	const Entry = Connections[self.Type][self.Name]
+	if Entry then
+		if self.Type == "REMOTE_FUNCTION" then
+			if Entry.Callback == self.Callback then
+				Connections[self.Type][self.Name] = nil
+			end
+		else
+			Entry[self.Callback] = nil
+		end
+	end
+
 	table.clear(self)
 	self.Connected = false
-	setmetatable(self, nil)
+	-- setmetatable(self, nil)
 end
 --[=[
 	@function Destroy
@@ -815,7 +829,7 @@ end
 
 const function OnRemoteEventPacket(Player: Player?, Args: { any }, Type: NetworkEventType)
 	--safety first gng
-	if IS_SERVER and not Player then
+	if Type ~= "BINDABLE_EVENT" and IS_SERVER and not Player then
 		return
 	end
 
@@ -901,10 +915,14 @@ const function OnRemoteFunctionPacket(Player: Player?, Args: { any }): any
 		end
 	end
 
-	-- const Results = if IS_SERVER then table.pack(Meta.Callback(Player, UnpackArgTable(DecodedArgs))) else table.pack(Meta.Callback(UnpackArgTable(DecodedArgs) :: any))
-	const Results = table.pack(
-		if IS_SERVER then (Meta.Callback :: (Player: Player, ...any) -> ())(Player :: Player, UnpackArgTable(DecodedArgs)) else (Meta.Callback :: (...any) -> ())(UnpackArgTable(DecodedArgs))
-	)
+	const Results = if IS_SERVER
+		then table.pack((Meta.Callback :: (Player: Player, ...any) -> ())(Player :: Player, UnpackArgTable(DecodedArgs)))
+		else table.pack((Meta.Callback :: (...any) -> ())(UnpackArgTable(DecodedArgs) :: any))
+
+	if Results == nil then
+		return
+	end
+
 	const CompressedResults = PackArgumentsForNetwork("", Results) --using a dummy name, ignore
 
 	return CompressedResults
@@ -927,6 +945,7 @@ end
 
 const function ServerInit()
 	ServerTimeStamp = workspace:GetServerTimeNow()
+	script:SetAttribute("ServerTimeStamp", ServerTimeStamp)
 	game:BindToClose(Destroy)
 
 	local TypeFolder = script:FindFirstChild("Types") :: Folder
@@ -980,6 +999,10 @@ const function ServerInit()
 end
 
 const function ClientInit()
+	--wait until server sends the time stamp so it works fine
+	if script:GetAttribute("ServerTimeStamp") == nil then
+		script:GetAttributeChangedSignal("ServerTimeStamp"):Wait()
+	end
 	ServerTimeStamp = script:GetAttribute("ServerTimeStamp") :: number?
 	const EventFolder = script:FindFirstChild("Types") or script:WaitForChild("Types")
 
