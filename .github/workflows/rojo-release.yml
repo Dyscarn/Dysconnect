@@ -1,0 +1,28 @@
+
+name: Build Rojo Release
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rokit
+        uses: CompeyDev/setup-rokit@v0.2.1
+
+      - name: Build Roblox model
+        run: rojo build default.project.json -o Dysconnect.rbxm
+
+      - name: Upload to GitHub Release
+        uses: softprops/action-gh-release@v3
+        with:
+          files: Dysconnect.rbxm
+          fail_on_unmatched_files: true
