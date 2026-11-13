@@ -1308,6 +1308,10 @@ function Dysconnect.FireServerConnection(name: string, Type: InvokableType, ...)
 		return
 	end
 
+	if DEBUG.SentPackets then
+		print(`[Dysconnect (DEBUG)] Fired event of type "{Type}" with name "{name}".\n{debug.traceback()}`)
+	end
+
 	(instance :: RemoteEvent --[[ | UnreliableRemoteEvent ]]):FireServer(PackArgumentsForNetwork(name, Arguments))
 
 	return
