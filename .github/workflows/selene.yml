@@ -1,0 +1,15 @@
+name: Selene
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  selene:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: CompeyDev/setup-rokit@v0.2.1
+      - run: selene src
