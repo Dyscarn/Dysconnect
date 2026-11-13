@@ -23,6 +23,8 @@ Dysconnect aims to make networking easier to organize and use by providing a uni
 
 * **Network exhaustion detection**: Help protect against excessive remote requests with configurable per-player rate limiting.
 
+* **Event call batching**: Reduce remote event calls by batching every single one called in a single frame to only one remote call.
+
 * **Configurable behavior**: Adjust network exhaustion detection settings to suit your experience.
 
 ## Supported types
@@ -65,6 +67,18 @@ Dysconnect includes network exhaustion detection to help mitigate excessive remo
 Its configuration includes a usage threshold, a recovery rate, and a modifier controlling how UnreliableRemoteEvent calls contribute to accumulated usage.
 
 The detection system is configurable to accommodate different networking requirements.
+
+## Event call batching
+
+Dysconnect also has an option to batch events, which is true by default when installing the library.
+
+This means that any (reliable / unreliable) remote event calls applicable for this will be added to a queue so all calls in a single frame are then batched into a single remote call containing all the data in the same frame.
+
+If the packet for that single call is big enough, packets that don't fit under the hard cap (16 KB by default) will be passed to the next frame to avoid lag spikes due to high amounts of data being sent at once.
+
+This is opt-in and can be disabled by default by specifying it in the settings of the module when initializing, or editing it directly if a package manager isn't being used.
+
+This can also be disabled for specific remote calls that need to be fired immediately instead of sent with the rest of the batched calls, which should be crucial things like fast gameplay mechanics or stuff that needs to arrive ASAP. This can be configured by sending a `Dysconnect.FireOptions()` as a last argument to a remote event, with a table for the options including a `Batch` boolean, indicating if that call should be batched or not.
 
 ## Alternatives
 

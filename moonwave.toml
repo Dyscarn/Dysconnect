@@ -23,6 +23,10 @@ title = "Simple, centralized networking"
 description = "Manage supported Roblox networking types through a unified interface. Dysconnect keeps communication organized without requiring you to manage large collections of remote instances throughout your project."
 
 [[home.features]]
+title = "Per-frame event batching (Opt-In by default and per remote call)"
+description = "Batch multiple outgoing events together and process them once per frame per target, reducing the number of individual network transmissions. Dysconnect automatically groups queued events into a single batch, helping streamline communication and reduce networking overhead."
+
+[[home.features]]
 title = "Efficient binary serialization"
 description = "Dysconnect uses Roblox's buffer library and a custom type-tagging system to encode supported values into a compact binary representation, with dedicated serialization logic for many Roblox data types."
 
