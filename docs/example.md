@@ -196,6 +196,31 @@ end)
 
 The callback receives the values in the order they were sent. Values that aren't officially supported by Dysconnect's optimized serialization system may fall back to JSON serialization, depending on their type.
 
+## Fire Options
+
+It's also possible to make a table of options using `Dysconnect.FireOptions()` just in case you want to disable stuff like Batching for a specific remote call.
+
+To use the resulting `Dysconnect.FireOptions()`, you must add it to the arguments of a remote call as the last one. It won't get sent over the network, so the other side won't see it as a last argument.
+
+It takes a table as the only argument to apply any options in any order and has autocompletion and API docs.
+
+It won't detect plain tables as FireOptions as `Dysconnect.FireOptions()` adds a special tag item to it that identifies it as one.
+
+```lua
+Dysconnect.FireAllClientConnection(
+    "UpdateEffect",
+    "REMOTE_EVENT",
+    Vector3.new(10, 5, 20),
+    Color3.fromRGB(255, 100, 50),
+    CFrame.new(0, 5, 0),
+	Dysconnect.FireOptions({ Batch = false }),
+)
+```
+
+This, for example, makes it so that remote call to `UpdateEffect` will be sent immediately and independently instead of being added to the batch queue to send at the end of a frame.
+
+More options might be added in the future, like making ID registration for remote names opt-in per remote call, just like Batching.
+
 ## Connection predicates
 
 `SetConnection()` accepts an optional predicate as its fourth argument. The callback only runs when the predicate returns `true`.
