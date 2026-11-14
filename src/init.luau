@@ -70,7 +70,7 @@ const IDToName = {} :: { [number]: string }
 
 const RESERVED_IDS = table.freeze({
 	IdAssignment = 0,
-	Batch = 1,
+	__Batch = 1,
 	RFunc = 2,
 }) :: { [string]: number }
 
@@ -454,10 +454,6 @@ const function ExtractFireOptions(Args: { [any]: any }): (boolean, Args?)
 
 	const batch: boolean = if options.Batch ~= nil then options.Batch else BATCHING.BatchByDefault
 
-	if not batch then
-		return false, nil
-	end
-
 	--this seems like an unnecessary first approach
 	-- const Clean = table.create(n - 1)
 	-- for i = 1, n - 1 do
@@ -465,7 +461,8 @@ const function ExtractFireOptions(Args: { [any]: any }): (boolean, Args?)
 	-- end
 	const Clean = table.clone(Args)
 	Clean[n] = nil
-	return true, Clean
+	Clean.n = n - 1
+	return batch, Clean
 end
 
 type Args = {
@@ -513,7 +510,7 @@ const function PackArgumentsForNetwork(Name: string, Arguments: Args): { any }
 
 	TotalSize = 2
 	if Arguments.n == 1 then
-		TotalSize += (1 + PreparedArgs[1].Size)
+		TotalSize += (2 + PreparedArgs[1].Size)
 	else
 		TotalSize += 1
 		for _, Item in PreparedArgs do
@@ -689,10 +686,8 @@ const function PackBatchEnvelope(Entries: { BatchPacket }): (buffer, { Instance 
 	for _, Payload in Prepared do
 		Payload.Offset = Offset
 
-		buffer.writeu8(Buffer, Offset, #Payload.Name)
-		Offset += 1
-		buffer.writestring(Buffer, Offset, Payload.Name)
-		Offset += #Payload.Name
+		buffer.writeu16(Buffer, Offset, GetIDFromName(Payload.Name))
+		Offset += 2
 
 		buffer.writeu8(Buffer, Offset, #Payload.Args)
 		Offset += 1
@@ -789,6 +784,10 @@ end
 
 const function FireQueuedCalls()
 	if #BatchQueue == 0 then
+		return
+	end
+
+	if not IS_SERVER and not script:GetAttribute("ClientReady") then
 		return
 	end
 
@@ -1083,7 +1082,7 @@ const function ServerInit()
 			Offset += 2
 		end
 
-		Dysconnect.FireClientConnection(Player, "IdAssignment", "REMOTE_EVENT" :: InvokableType, Packet)
+		Dysconnect.FireClientConnection(Player, "IdAssignment", "REMOTE_EVENT" :: InvokableType, Packet, Dysconnect.FireOptions({ Batch = false }))
 	end)
 
 	script:SetAttribute("ServerReady", true)
@@ -1136,6 +1135,8 @@ const function ClientInit()
 
 			GenerateIdForName(Name, ID)
 		end
+
+		script:SetAttribute("ClientReady", true)
 	end)
 
 	print("[Dysconnect.Init()] Initialized networking on client successfully!")
@@ -1195,7 +1196,7 @@ function Dysconnect.Init(config: InitConfig?)
 			script:GetAttributeChangedSignal("ServerReady"):Wait()
 		end
 
-		Dysconnect.FireServerConnection("IdAssignment", "REMOTE_EVENT")
+		Dysconnect.FireServerConnection("IdAssignment", "REMOTE_EVENT", Dysconnect.FireOptions({ Batch = false }))
 	end
 end
 
@@ -1349,7 +1350,7 @@ function Dysconnect.FireClientConnection(target: Player | { Player }, name: stri
 		return
 	end
 
-	const CompressedArguments = PackArgumentsForNetwork(name, Arguments)
+	const CompressedArguments = PackArgumentsForNetwork(name, CleanArgs :: Args)
 
 	if typeof(target) == "table" then
 		const Results = {}
@@ -1420,7 +1421,7 @@ function Dysconnect.FireAllClientConnection(name: string, Type: RemoteType, ...)
 		return
 	end
 
-	instance:FireAllClients(PackArgumentsForNetwork(name, Arguments))
+	instance:FireAllClients(PackArgumentsForNetwork(name, CleanArgs :: Args))
 
 	if DEBUG.SentPackets then
 		print(`[Dysconnect (DEBUG)] Fired event of type "{Type}" with name "{name}".\n{debug.traceback()}`)
@@ -1492,7 +1493,7 @@ function Dysconnect.FireServerConnection(name: string, Type: InvokableType, ...)
 		print(`[Dysconnect (DEBUG)] Fired event of type "{Type}" with name "{name}".\n{debug.traceback()}`)
 	end
 
-	(instance :: RemoteEvent --[[ | UnreliableRemoteEvent ]]):FireServer(PackArgumentsForNetwork(name, Arguments))
+	(instance :: RemoteEvent --[[ | UnreliableRemoteEvent ]]):FireServer(PackArgumentsForNetwork(name, CleanArgs :: Args))
 
 	return
 end
@@ -1555,7 +1556,7 @@ end
 	
 	@return boolean -- If the network service is available in the current environment.
 ]=]
-function Dysconnect.IsLive()
+function Dysconnect.IsLive(): boolean
 	return ServiceLive
 end
 
