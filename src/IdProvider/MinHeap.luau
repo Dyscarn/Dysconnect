@@ -7,11 +7,14 @@ type MetaMinHeap = {
 	Push: (self: MinHeap, Value: number) -> (),
 	Pop: (self: MinHeap) -> number?,
 }
-type MinHeap = typeof(setmetatable({} :: {
-	Data: { [number]: number },
-}, {} :: {
-	__index: MetaMinHeap,
-}))
+type MinHeap = typeof(setmetatable(
+	{} :: {
+		Data: { [number]: number },
+	},
+	{} :: {
+		__index: MetaMinHeap,
+	}
+))
 
 --[=[
 	@class MinHeap

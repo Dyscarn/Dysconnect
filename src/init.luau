@@ -75,7 +75,7 @@ const RESERVED_IDS = table.freeze({
 }) :: { [string]: number }
 
 const function GenerateIdForName(Name: string, Override: number?): number
-	const NewID = if IS_SERVER then IdProvider.Register(Name, Override) else (Override :: number)
+	const NewID = if IS_SERVER then IdProvider.Register(Name, Override) else Override :: number
 	NameToID[Name] = NewID
 	IDToName[NewID] = Name
 	return NewID
@@ -92,16 +92,16 @@ const function GetNameFromID(ID: number): string
 	-- 		Name = IDToName[ID]
 	-- 		Timeout += task.wait()
 	-- 	until Name ~= nil or Timeout >= 30
-		
+
 	-- 	if Name == nil then
 	-- 		error(`[Dysconnect] Failed name discovery for ID {ID}!`)
 	-- 	end
 	-- end
-	
+
 	if Name == nil then
 		error(`[Dysconnect] Failed name discovery for ID {ID}!`)
 	end
-	
+
 	return Name
 end
 const function GetIDFromName(Name: string): number
@@ -112,16 +112,16 @@ const function GetIDFromName(Name: string): number
 	-- 		ID = NameToID[Name]
 	-- 		Timeout += task.wait()
 	-- 	until ID ~= nil or Timeout >= 30
-		
+
 	-- 	if ID == nil then
 	-- 		error(`[Dysconnect] Failed name discovery for ID {ID}!`)
 	-- 	end
 	-- end
-	
+
 	if ID == nil then
 		error(`[Dysconnect] Failed name discovery for name "{Name}"!`)
 	end
-	
+
 	return ID
 end
 
@@ -770,9 +770,9 @@ const function ReceiveCall(Player: Player?, name: string, Type: NetworkEventType
 		end
 
 		if ServerCheck then
-			task.spawn(callback :: (...any) -> (...any), Player :: Player, ...)
+			task.spawn(callback :: (...any) -> ...any, Player :: Player, ...)
 		else
-			task.spawn(callback :: (...any) -> (...any), ...)
+			task.spawn(callback :: (...any) -> ...any, ...)
 		end
 	end
 end
@@ -1066,7 +1066,7 @@ const function ServerInit()
 			Count += 1
 			ByteSize += 5 + #Name -- 2 byte (ID amount) + 1 byte (name length) + Name length + 2 bytes (ID length)
 		end
-		
+
 		const Packet = buffer.create(ByteSize)
 		buffer.writeu16(Packet, 0, Count)
 		local Offset = 2
@@ -1222,7 +1222,8 @@ function Dysconnect.SetConnection(name: string, Type: EventType, Callback: Callb
 	-- Dysconnect.WaitForInit()
 	--only wait for the connection table to appear instead
 	if Connections[Type] == nil and NAMING_EQUIVALENTS[Type] ~= nil then
-		repeat task.wait()
+		repeat
+			task.wait()
 		until Connections[Type]
 	end
 
