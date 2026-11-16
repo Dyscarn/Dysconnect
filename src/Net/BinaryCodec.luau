@@ -2,6 +2,7 @@
 --figure out what's here i'm done 😭 -dys
 
 --!strict
+--!optimize 2
 --!native
 
 const HttpService = game:GetService("HttpService")

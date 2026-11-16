@@ -1,26 +1,29 @@
+--!strict
+--!optimize 2
+
 const Players = game:GetService("Players")
 
-const Config = require("./Config")
+const Config = require("../Config")
 
 local Stamp = workspace:GetServerTimeNow()
 const function Time(): number
 	return workspace:GetServerTimeNow() - (Stamp :: number)
 end
 
-const ExhaustionDetection = {}
+const ExhaustionDetector = {}
 const Logs = {} :: { [number]: {
 	Total: number,
 	Last: number,
 } }
 
-function ExhaustionDetection.Setup()
+function ExhaustionDetector.Setup()
 	Players.PlayerRemoving:Connect(function(Player: Player)
 		--cleanup
 		Logs[Player.UserId] = nil
 	end)
 end
 
-function ExhaustionDetection.CheckPlayerRateLimit(Player: Player, EventType: "RemoteEvent" | "RemoteFunction" | "UnreliableRemoteEvent"): boolean
+function ExhaustionDetector.CheckPlayerRateLimit(Player: Player, EventType: "RemoteEvent" | "RemoteFunction" | "UnreliableRemoteEvent"): boolean
 	if EventType == "UnreliableRemoteEvent" and Config.ExhaustionDetection.URemoteEventRateIncreaseMult <= 0 then
 		return true
 	end
@@ -50,4 +53,4 @@ function ExhaustionDetection.CheckPlayerRateLimit(Player: Player, EventType: "Re
 	return true
 end
 
-return table.freeze(ExhaustionDetection)
+return table.freeze(ExhaustionDetector)

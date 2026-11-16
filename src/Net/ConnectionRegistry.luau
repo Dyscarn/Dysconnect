@@ -1,7 +1,7 @@
 --!strict
 --!optimize 2
 
-const Types = require("./Types")
+const Types = require("../Types")
 
 type List = { [Types.EventType]: { [string]: Types.InternalConnection } }
 const List = {} :: List
