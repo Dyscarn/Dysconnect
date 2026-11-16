@@ -19,6 +19,7 @@ const Config = {
 		.SentPackets boolean -- Prints info whenever a packet is sent from either side (including name and type).
 		.RateLimitExceeded boolean -- Prints info whenever a [Player] exceeds its rate limit, thus dropping the packets it sends (includes name and [Player.UserId]).
 		.ExcludeUnreliable boolean -- If `true`, will exclude [UnreliableRemoteEvent] send & receive prints (from [DEBUG.ReceivedPackets] and [DEBUG.SentPackets]).
+		.ExcludeReserved boolean -- If `true`, will exclude prints of events that are reserved internally by Dysconnect.
 		.Strict boolean -- Prints a warn if an object of a type not supported by Dysconnect is trying to be sent over the network, falling back to JSON.
 	]=]
 	Debug = table.freeze({
@@ -27,6 +28,7 @@ const Config = {
 		SentPackets = false,
 		RateLimitExceeded = true,
 		ExcludeUnreliable = true,
+		ExcludeReserved = true,
 		Strict = true,
 	}),
 	--[=[

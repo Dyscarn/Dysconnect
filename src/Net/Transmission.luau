@@ -269,7 +269,7 @@ function Transmission.FireServerConnection(name: string, Type: Types.InvokableTy
 	const Arguments = table.pack(...)
 
 	if Type == "REMOTE_FUNCTION" then
-		if Config.Debug.SentPackets then
+		if Config.Debug.SentPackets and (name:sub(0, 2) ~= "__" or not Config.Debug.ExcludeReserved) then
 			print(`[Dysconnect (DEBUG)] Fired event of type "REMOTE_FUNCTION" with name "{name}".\n{debug.traceback()}`)
 		end
 
@@ -291,7 +291,7 @@ function Transmission.FireServerConnection(name: string, Type: Types.InvokableTy
 		return
 	end
 
-	if Config.Debug.SentPackets then
+	if Config.Debug.SentPackets and (name:sub(0, 2) ~= "__" or not Config.Debug.ExcludeReserved) then
 		print(`[Dysconnect (DEBUG)] Fired event of type "{Type}" with name "{name}".\n{debug.traceback()}`)
 	end
 
@@ -332,7 +332,7 @@ function Transmission.FireConnection(name: string, ...)
 
 	const CompressedArguments = PacketSerializer.PackArgumentsForNetwork(name, table.pack(...))
 
-	if Config.Debug.SentPackets then
+	if Config.Debug.SentPackets and (name:sub(0, 2) ~= "__" or not Config.Debug.ExcludeReserved) then
 		print(`[Dysconnect (DEBUG)] Fired event of type "BINDABLE_EVENT" with name "{name}".\n{debug.traceback()}`)
 	end
 

@@ -76,7 +76,7 @@ const function OnRemoteEventPacket(Player: Player?, Args: { any }, Type: Types.N
 		const Entries = PacketSerializer.UnpackBatchEnvelope(DecodedArgs[1], DecodedArgs[2] or {})
 
 		for _, Entry in Entries do
-			if Config.Debug.ReceivedPackets and (Type ~= "UREMOTE_EVENT" or not Config.Debug.ExcludeUnreliable) then
+			if Config.Debug.ReceivedPackets and (Type ~= "UREMOTE_EVENT" or not Config.Debug.ExcludeUnreliable) and (Entry.EventName:sub(0, 2) ~= "__" or not Config.Debug.ExcludeReserved) then
 				const BufferLength = PacketSerializer.GetSizeOfBatchEvent(Entry.EventName, Entry.Args)
 				const NameLength = #Entry.EventName
 				const ArgsLength = math.max(0, BufferLength - NameLength)
@@ -91,7 +91,7 @@ const function OnRemoteEventPacket(Player: Player?, Args: { any }, Type: Types.N
 		return
 	end
 
-	if Config.Debug.ReceivedPackets and (Type ~= "UREMOTE_EVENT" or not Config.Debug.ExcludeUnreliable) then
+	if Config.Debug.ReceivedPackets and (Type ~= "UREMOTE_EVENT" or not Config.Debug.ExcludeUnreliable) and (Name:sub(0, 2) ~= "__" or not Config.Debug.ExcludeReserved) then
 		const BufferLength = Args[1] and typeof(Args[1]) == "buffer" and buffer.len(Args[1]) or #Name
 		const NameLength = #Name
 		const ArgsLength = math.max(0, BufferLength - NameLength)

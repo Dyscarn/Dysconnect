@@ -13,7 +13,7 @@ const IS_SERVER = RunService:IsServer()
 const BatchQueue = {} :: { Types.TargetedBatchPacket }
 
 const function AddToQueue(player: (Player | { Player } | "All")?, name: string, Type: Types.RemoteType, Args: Types.Args)
-	if Config.Debug.SentPackets then
+	if Config.Debug.SentPackets and (name:sub(0, 2) ~= "__" or not Config.Debug.ExcludeReserved) then
 		print(`[Dysconnect (DEBUG)] Added event of type "{Type}" with name {name} to batch queue.\n{debug.traceback()}`)
 	end
 
