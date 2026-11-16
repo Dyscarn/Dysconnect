@@ -1,9 +1,10 @@
 --!strict
+--!native
+--!optimize 2
 
---min heap for cool 0(log n) lookup
+--min heap for cool O(log n) insertion and removal
 type MetaMinHeap = {
 	__index: MetaMinHeap,
-	--IsEmpty: (self: MinHeap) -> boolean,
 	Push: (self: MinHeap, Value: number) -> (),
 	Pop: (self: MinHeap) -> number?,
 }

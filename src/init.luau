@@ -52,51 +52,36 @@
 	-dys
 ]]
 
-const Players = game:GetService("Players")
 const RunService = game:GetService("RunService")
 
-const DataTypes = require("@self/DataTypes")
+const Types = require("@self/Types")
+const Config = require("@self/Config")
+const BinaryCodec = require("@self/BinaryCodec")
 const IdProvider = require("@self/IdProvider")
-
-local ServerTimeStamp: number?
-const function Time(): number
-	return workspace:GetServerTimeNow() - (ServerTimeStamp :: number)
-end
+const ConnectionHandler = require("@self/ConnectionHandler")
+const ExhaustionDetection = require("@self/ExhaustionDetection")
 
 const IS_SERVER = RunService:IsServer()
 
-const NameToID = {} :: { [string]: number }
-const IDToName = {} :: { [number]: string }
-
 const RESERVED_IDS = table.freeze({
-	IdAssignment = 0,
+	__IdAssignment = 0,
 	__Batch = 1,
-	RFunc = 2,
+	__RFunc = 2,
 }) :: { [string]: number }
 
 const function GenerateIdForName(Name: string, Override: number?): number
-	const NewID = if IS_SERVER then IdProvider.Register(Name, Override) else Override :: number
-	NameToID[Name] = NewID
-	IDToName[NewID] = Name
-	return NewID
+	if IS_SERVER then
+		return IdProvider.Register(Name, Override)
+	end
+	
+	return Override or -1
 end
 for Name, ID in RESERVED_IDS do
 	GenerateIdForName(Name, ID)
 end
 
 const function GetNameFromID(ID: number): string
-	local Name = IDToName[ID]
-	-- if Name == nil then
-	-- 	local Timeout = 0
-	-- 	repeat
-	-- 		Name = IDToName[ID]
-	-- 		Timeout += task.wait()
-	-- 	until Name ~= nil or Timeout >= 30
-
-	-- 	if Name == nil then
-	-- 		error(`[Dysconnect] Failed name discovery for ID {ID}!`)
-	-- 	end
-	-- end
+	local Name = IdProvider.GetObjectByID(ID)
 
 	if Name == nil then
 		error(`[Dysconnect] Failed name discovery for ID {ID}!`)
@@ -105,18 +90,7 @@ const function GetNameFromID(ID: number): string
 	return Name
 end
 const function GetIDFromName(Name: string): number
-	local ID = NameToID[Name]
-	-- if ID == nil then
-	-- 	local Timeout = 0
-	-- 	repeat
-	-- 		ID = NameToID[Name]
-	-- 		Timeout += task.wait()
-	-- 	until ID ~= nil or Timeout >= 30
-
-	-- 	if ID == nil then
-	-- 		error(`[Dysconnect] Failed name discovery for ID {ID}!`)
-	-- 	end
-	-- end
+	local ID = IdProvider.GetIDByObject(Name)
 
 	if ID == nil then
 		error(`[Dysconnect] Failed name discovery for name "{Name}"!`)
@@ -124,130 +98,6 @@ const function GetIDFromName(Name: string): number
 
 	return ID
 end
-
---[=[
-	@type Callback ((...any) -> any) | ((Player: Player, ...any) -> any) | ((...any) -> ()) | ((Player: Player, ...any) -> ())
-	@within Dysconnect
-]=]
-type Callback = ((...any) -> any) | ((Player: Player, ...any) -> any) | ((...any) -> ()) | ((Player: Player, ...any) -> ())
---[=[
-	@type Predicate ((...any) -> boolean) | ((Player: Player, ...any) -> boolean)
-	@within Dysconnect
-	
-	Function containing sanity checks to execute a callback afterwards if it returns `true`.
-]=]
-type Predicate = ((...any) -> boolean) | ((Player: Player, ...any) -> boolean)
-
---[=[
-	@type RemoteType "REMOTE_EVENT" | "UREMOTE_EVENT"
-	@within Dysconnect
-	
-	Event types that go over the network and don't return anything.
-]=]
-type RemoteType = "REMOTE_EVENT" | "UREMOTE_EVENT"
---[=[
-	@type NetworkEventType RemoteType | "BINDABLE_EVENT"
-	@within Dysconnect
-	
-	Event types that do and don't go over the network but don't return anything.
-]=]
-type NetworkEventType = RemoteType | "BINDABLE_EVENT"
---[=[
-	@type InvokableType RemoteType | "REMOTE_FUNCTION"
-	@within Dysconnect
-	
-	Event types that go over the network that do and don't return anything.
-]=]
-type InvokableType = RemoteType | "REMOTE_FUNCTION"
---[=[
-	@type EventType RemoteType | NetworkEventType | InvokableType
-	@within Dysconnect
-	
-	All supported event and function types in Dysconnect.
-]=]
-type EventType = RemoteType | NetworkEventType | InvokableType
-
-type InternalConnection = {
-	Callback: Callback?,
-	Predicate: Predicate?,
-	[Callback]: {
-		Predicate: Predicate?,
-	}?,
-}
-const Connections = {} :: { [EventType]: { [string]: InternalConnection } }
-const function GetConnectionsByName(Type: NetworkEventType, Name: string): InternalConnection?
-	const Typed = Connections[Type]
-	if not Typed then
-		return nil
-	end
-	return Typed[Name]
-end
-
---[=[
-	@class Connection
-	@__index Connection
-	
-	Represents a connection to a network event or function.
-]=]
-const Connection = {}
-Connection.__index = Connection
-
---[=[
-	@interface Connection
-	@within Connection
-	
-	.Connected boolean -- If this [Connection] is still bound to its event.
-	.Type EventType -- The type of event it's connected to.
-	.Name string -- The name of the event it's connected to.
-	.Callback Callback -- The callback that'll execute when this connection receives a signal.
-]=]
-type Connection = typeof(setmetatable(
-	{} :: {
-		Connected: boolean,
-		Type: EventType,
-		Name: string,
-		Callback: Callback,
-	},
-	{} :: {
-		Disconnect: (self: Connection) -> (),
-		Destroy: (self: Connection) -> (),
-	}
-))
-
---[=[
-	@within Connection
-	
-	Destroys this [Connection], rendering it unusuable and setting its [Connection.Connected] property to `false`.
-]=]
-function Connection.Disconnect(self: Connection)
-	if not self.Connected then
-		return
-	end
-
-	const Entry = GetConnectionsByName(self.Type :: NetworkEventType, self.Name)
-	if Entry then
-		if self.Type == "REMOTE_FUNCTION" then
-			if Entry.Callback == self.Callback then
-				Connections[self.Type][self.Name] = nil
-			end
-		else
-			Entry[self.Callback] = nil
-		end
-	end
-
-	table.clear(self)
-	self.Connected = false
-	-- setmetatable(self, nil)
-end
---[=[
-	@function Destroy
-	@within Connection
-	
-	Equivalent to [Connection.Disconnect].
-	
-	@param self Connection
-]=]
-Connection.Destroy = Connection.Disconnect --shortcut for compatibility
 
 --[=[
 	@class Dysconnect
@@ -261,58 +111,13 @@ const NAMING_EQUIVALENTS = table.freeze({
 	REMOTE_FUNCTION = "RemoteFunction",
 	UREMOTE_EVENT = "UnreliableRemoteEvent",
 	BINDABLE_EVENT = "BindableEvent",
-}) :: typeof(table.freeze({} :: { [EventType]: string }))
-const Instances = {} :: { [EventType]: Instance }
+}) :: typeof(table.freeze({} :: { [Types.EventType]: string }))
+const Instances = {} :: { [Types.EventType]: Instance }
 
---[=[
-	@interface BatchPacket
-	@within Dysconnect
-	@private
-	
-	Queued packet for batching in a frame.
-	
-	.EventName string -- The name of the target event.
-	.Args { [number]: any } -- The arguments to pass to the event.
-]=]
-type BatchPacket = {
-	EventName: string,
-	Args: Args,
-}
---[=[
-	@interface TargetedBatchPacket
-	@within Dysconnect
-	@private
-	
-	Queued packet for batching in a frame, targeted to one or more [Player]s.
-	
-	.Base BatchPacket -- Contains all fields from [BatchPacket]. This doesn't mean this has a field called "Base".
-	.EventType RemoteType -- The type of event to fire.
-	.Target (Player | { Player })? -- The player/s to fire the event to.
-]=]
-type TargetedBatchPacket = BatchPacket & {
-	Target: (Player | "All")?,
-	EventType: RemoteType,
-}
-type ReceivedBatchPacket = BatchPacket
-
-const BatchQueue = {} :: { TargetedBatchPacket }
+const BatchQueue = {} :: { Types.TargetedBatchPacket }
 
 local ServiceLive = false
 
---[=[
-	@interface FireOptions
-	@within Dysconnect
-	
-	Options for a specific remote call.
-	
-	.Batch boolean? -- If this remote call will be batch. Overrides [BATCHING.BatchByDefault].
-]=]
-type FireOptions = {
-	Batch: boolean?,
-}
-type BuiltFireOptions = FireOptions & {
-	__DysconnectFireOptions: true,
-}
 --[=[
 	@within Dysconnect
 	
@@ -323,75 +128,21 @@ type BuiltFireOptions = FireOptions & {
 	@param Options FireOptions -- The options to apply to it.
 	@return FireOptions -- The [FireOptions] to use, with a custom header.
 ]=]
-function Dysconnect.FireOptions(Options: FireOptions): typeof(table.freeze({} :: BuiltFireOptions))
+function Dysconnect.FireOptions(Options: Types.FireOptions): Types.BuiltFireOptions
 	--type casting it here so i don't have to make a different table for it while keeping it strict
-	(Options :: BuiltFireOptions).__DysconnectFireOptions = true
-	return table.freeze(Options)
+	(Options :: Types.BuiltFireOptions).__DysconnectFireOptions = true
+	return table.freeze(Options) :: Types.BuiltFireOptions
 end
 
---[=[
-	@interface DEBUG
-	@within Dysconnect
-	@private
-	
-	Debug print statement toggles.
-	
-	Modifiable in the network script or in [Dysconnect.Init].	
-	
-	.QueuedPackets boolean -- Prints info whenever a packet is added to the batch queue (including name, type and size in bytes).
-	.ReceivedPackets boolean -- Prints info whenever a packet is received on either side (including name, type and size in bytes).
-	.SentPackets boolean -- Prints info whenever a packet is sent from either side (including name and type).
-	.RateLimitExceeded boolean -- Prints info whenever a [Player] exceeds its rate limit, thus dropping the packets it sends (includes name and [Player.UserId]).
-	.ExcludeUnreliable boolean -- If `true`, will exclude [UnreliableRemoteEvent] send & receive prints (from [DEBUG.ReceivedPackets] and [DEBUG.SentPackets]).
-	.Strict boolean -- Prints a warn if an object of a type not supported by Dysconnect is trying to be sent over the network, falling back to JSON.
-]=]
-local DEBUG = table.freeze({
-	QueuedPackets = true,
-	ReceivedPackets = true,
-	SentPackets = false,
-	RateLimitExceeded = true,
-	ExcludeUnreliable = true,
-	Strict = true,
-})
---[=[
-	@interface EXHAUSTION_DETECTION
-	@within Dysconnect
-	@private
-	
-	Configuration for per-player network exhaustion detection.
-	Tracks incoming remote calls and gradually reduces the accumulated
-	usage over time to limit excessive requests.
-	
-	Modifiable in the network script or in [Dysconnect.Init].
-	
-	.RateLimit number -- Maximum accumulated usage before requests are rejected.
-	.RateDropPerSecond number -- Rate at which accumulated usage decays per second.
-	.URemoteEventRateIncreaseMult number -- Amount of usage added by each [UnreliableRemoteEvent] call.
-]=]
-local EXHAUSTION_DETECTION = table.freeze({
-	RateLimit = 50,
-	RateDropPerSecond = 18,
-	URemoteEventRateIncreaseMult = 0,
-})
---[=[
-	@interface BATCHING
-	@within Dysconnect
-	@private
-	
-	Configuration for event batching, to not fire a lot of remote calls in a single frame.
-	Limited at a batch size cap in KB to not produce lag spikes every time a big event
-	with a lot of remote calls fires in a single frame, equivalent to firing a LOT of remotes
-	in the same timespan, which is an issue.
-	
-	Modifiable in the network script or in [Dysconnect.Init].
-	
-	.BatchByDefault boolean -- If remote calls will be batched by default, since you might not want this sometimes.
-	.MaxBatchSize number -- The maximum packet size of a single frame's batch, in KB.
-]=]
-local BATCHING = table.freeze({
-	BatchByDefault = true,
-	MaxBatchSize = 16, --KB
-})
+const function CreateMissingIdBuffer(name: string, Id: number): buffer
+	const ByteSize = 5 + #name -- 2 bytes (ID count) + 1 byte (name length) + Name length + 2 bytes (ID)
+	const Packet = buffer.create(ByteSize)
+	buffer.writeu16(Packet, 0, 1)
+	buffer.writeu8(Packet, 2, #name)
+	buffer.writestring(Packet, 3, name)
+	buffer.writeu16(Packet, 3 + #name, Id)
+	return Packet
+end
 
 const function WriteMissingTableValues<T, S>(Target: T & {}, Values: S & {}): T & S & {}
 	for Key, Value in Values :: { [any]: any } do
@@ -405,54 +156,22 @@ const function WriteMissingTableValues<T, S>(Target: T & {}, Values: S & {}): T 
 	return Target
 end
 
-const PlayerExhaustionLogs = {}
-
-const function CheckPlayerRateLimit(Player: Player, EventType: "RemoteEvent" | "RemoteFunction" | "UnreliableRemoteEvent"): boolean
-	if EventType == "UnreliableRemoteEvent" and EXHAUSTION_DETECTION.URemoteEventRateIncreaseMult <= 0 then
-		return true
-	end
-
-	const Now = Time()
-
-	if not PlayerExhaustionLogs[Player.UserId] then
-		PlayerExhaustionLogs[Player.UserId] = { Total = 0, Last = Now }
-	end
-
-	const Data = PlayerExhaustionLogs[Player.UserId]
-
-	const Elapsed = Now - Data.Last
-	--check how many remotes it's fired before the second passes
-	const Used = Elapsed * EXHAUSTION_DETECTION.RateDropPerSecond
-
-	Data.Total = math.max(0, Data.Total - Used)
-	Data.Last = Now
-
-	--check if it exceeds the limit
-	if Data.Total >= EXHAUSTION_DETECTION.RateLimit then
-		return false
-	end
-
-	Data.Total += EventType == "UnreliableRemoteEvent" and EXHAUSTION_DETECTION.URemoteEventRateIncreaseMult or 1
-
-	return true
-end
-
 const function UnpackArgTable(ArgTable: { [any]: any }): ...any
 	return table.unpack(ArgTable, 1, ArgTable.n)
 end
 
-const function ExtractFireOptions(Args: { [any]: any }): (boolean, Args?)
+const function ExtractFireOptions(Args: { [any]: any }): (boolean, Types.Args?)
 	const n = Args.n :: number
 	if not n or n <= 0 then
-		return BATCHING.BatchByDefault, Args
+		return Config.Batching.BatchByDefault, Args
 	end
 
-	const options = Args[n] :: BuiltFireOptions
+	const options = Args[n] :: Types.BuiltFireOptions
 	if typeof(options) ~= "table" or not options.__DysconnectFireOptions then
-		return BATCHING.BatchByDefault, Args
+		return Config.Batching.BatchByDefault, Args
 	end
 
-	const batch: boolean = if options.Batch ~= nil then options.Batch else BATCHING.BatchByDefault
+	const batch: boolean = if options.Batch ~= nil then options.Batch else Config.Batching.BatchByDefault
 
 	--this seems like an unnecessary first approach
 	-- const Clean = table.create(n - 1)
@@ -465,11 +184,7 @@ const function ExtractFireOptions(Args: { [any]: any }): (boolean, Args?)
 	return batch, Clean
 end
 
-type Args = {
-	n: number,
-	[number]: any,
-}
-const function PackArgumentsForNetwork(Name: string, Arguments: Args): { any }
+const function PackArgumentsForNetwork(Name: string, Arguments: Types.Args): { any }
 	if Arguments.n == 0 then
 		return { Name, {} }
 	end
@@ -489,14 +204,14 @@ const function PackArgumentsForNetwork(Name: string, Arguments: Args): { any }
 	for i = 1, Arguments.n do
 		const Value = Arguments[i]
 		--get le tag
-		const Tag = DataTypes.GetTagFromValue(Value)
+		const Tag = BinaryCodec.GetTagFromValue(Value)
 
-		if DEBUG.Strict and Tag == DataTypes.Enum.JSON then
+		if Config.Debug.Strict and Tag == BinaryCodec.Enum.JSON then
 			warn(`[Dysconnect (DEBUG)] Data type "{typeof(Value)}" isn't officially supported by Dysconnect to auto-optimize into a buffer! Falling back to JSON strings...`)
 		end
 
 		--get le size
-		const PayloadSize = DataTypes.GetPayloadSize(Tag, Value)
+		const PayloadSize = BinaryCodec.GetPayloadSize(Tag, Value)
 
 		--add le size to total + 1 for the tag
 		TotalSize += (1 + PayloadSize)
@@ -527,7 +242,7 @@ const function PackArgumentsForNetwork(Name: string, Arguments: Args): { any }
 		const Offset = 3
 
 		buffer.writeu8(PacketBuffer, Offset, PreparedArgs[1].Tag)
-		DataTypes.Writers[PreparedArgs[1].Tag](PacketBuffer, Offset + 1, PreparedArgs[1].Value, InstanceList)
+		BinaryCodec.Writers[PreparedArgs[1].Tag](PacketBuffer, Offset + 1, PreparedArgs[1].Value, InstanceList)
 	else
 		buffer.writeu16(PacketBuffer, 0, NameId)
 		buffer.writeu8(PacketBuffer, 2, Arguments.n)
@@ -537,7 +252,7 @@ const function PackArgumentsForNetwork(Name: string, Arguments: Args): { any }
 			--write le tag first
 			buffer.writeu8(PacketBuffer, Offset, Item.Tag)
 			--write it and increment the offset based on it
-			Offset = DataTypes.Writers[Item.Tag](PacketBuffer, Offset + 1, Item.Value, InstanceList)
+			Offset = BinaryCodec.Writers[Item.Tag](PacketBuffer, Offset + 1, Item.Value, InstanceList)
 		end
 	end
 
@@ -566,18 +281,18 @@ const function UnpackArgumentsFromNetwork(Arguments: { any }): (string, { [any]:
 	local Name = GetNameFromID(ID)
 
 	local Offset: number
-	local Unpacked: Args
+	local Unpacked: Types.Args
 
 	if ArgCount == 1 then
-		Unpacked = table.create(1) :: Args
+		Unpacked = table.create(1) :: Types.Args
 		Unpacked.n = 1
 
 		Offset = 3
 		const Tag = buffer.readu8(PacketBuffer, Offset)
-		const Value = DataTypes.Readers[Tag](PacketBuffer, Offset + 1, InstanceList)
+		const Value = BinaryCodec.Readers[Tag](PacketBuffer, Offset + 1, InstanceList)
 		Unpacked[1] = Value
 	else
-		Unpacked = table.create(ArgCount) :: Args
+		Unpacked = table.create(ArgCount) :: Types.Args
 		Unpacked.n = ArgCount
 
 		Offset = 3
@@ -588,7 +303,7 @@ const function UnpackArgumentsFromNetwork(Arguments: { any }): (string, { [any]:
 			Offset += 1
 
 			--get correspondent value
-			const Value, NewCursor = DataTypes.Readers[Tag](PacketBuffer, Offset, InstanceList)
+			const Value, NewCursor = BinaryCodec.Readers[Tag](PacketBuffer, Offset, InstanceList)
 
 			--put it in the param table
 			Unpacked[i] = Value
@@ -601,15 +316,15 @@ const function UnpackArgumentsFromNetwork(Arguments: { any }): (string, { [any]:
 	return Name, Unpacked, Unpacked.n, #InstanceList
 end
 
-const function Fire(player: Player, event: RemoteEvent | UnreliableRemoteEvent | RemoteFunction, name: string, Type: InvokableType, ...): ...any
-	if DEBUG.SentPackets then
+const function Fire(player: Player, event: RemoteEvent | UnreliableRemoteEvent | RemoteFunction, name: string, Type: Types.InvokableType, ...): ...any
+	if Config.Debug.SentPackets then
 		print(`[Dysconnect (DEBUG)] Fired event of type "{Type}" with name "{name}".\n{debug.traceback()}`)
 	end
 
 	if Type == "REMOTE_FUNCTION" then
 		const Results = (event :: RemoteFunction):InvokeClient(player, ...)
 
-		if DEBUG.ReceivedPackets then
+		if Config.Debug.ReceivedPackets then
 			const BufferLength = Results[1] and typeof(Results[1]) == "buffer" and buffer.len(Results[1]) or 0
 			print(`[Dysconnect (DEBUG)] Received back results from a "REMOTE_FUNCTION" with name "{name}" and a size of {BufferLength} bytes.`)
 		end
@@ -622,7 +337,7 @@ const function Fire(player: Player, event: RemoteEvent | UnreliableRemoteEvent |
 	return
 end
 
-const function PackBatchEnvelope(Entries: { BatchPacket }): (buffer, { Instance })
+const function PackBatchEnvelope(Entries: { Types.BatchPacket }): (buffer, { Instance })
 	const EntryCount = #Entries
 	local TotalSize = 4
 
@@ -646,16 +361,16 @@ const function PackBatchEnvelope(Entries: { BatchPacket }): (buffer, { Instance 
 
 		for i = 1, Entry.Args.n do
 			const Value = Entry.Args[i]
-			const Tag = DataTypes.GetTagFromValue(Value)
+			const Tag = BinaryCodec.GetTagFromValue(Value)
 
-			if Tag == DataTypes.Enum.Instance then
+			if Tag == BinaryCodec.Enum.Instance then
 				if not InstanceMap[Value] then
 					table.insert(InstanceList, Value)
 					InstanceMap[Value] = #InstanceList
 				end
 			end
 
-			const PayloadSize = DataTypes.GetPayloadSize(Tag, Value)
+			const PayloadSize = BinaryCodec.GetPayloadSize(Tag, Value)
 			EntrySize += 1 + PayloadSize
 
 			table.insert(EntryArgs, {
@@ -698,14 +413,14 @@ const function PackBatchEnvelope(Entries: { BatchPacket }): (buffer, { Instance 
 		for _, Arg in Payload.Args do
 			buffer.writeu8(Buffer, Offset, Arg.Tag)
 			Offset += 1
-			Offset = DataTypes.Writers[Arg.Tag](Buffer, Offset, Arg.Value, InstanceList)
+			Offset = BinaryCodec.Writers[Arg.Tag](Buffer, Offset, Arg.Value, InstanceList)
 		end
 	end
 
 	return Buffer, InstanceList
 end
 
-const function UnpackBatchEnvelope(Buffer: buffer, InstanceList: { Instance }): { ReceivedBatchPacket }
+const function UnpackBatchEnvelope(Buffer: buffer, InstanceList: { Instance }): { Types.ReceivedBatchPacket }
 	local Offset = 0
 
 	const EntryCount = buffer.readu16(Buffer, Offset)
@@ -713,7 +428,7 @@ const function UnpackBatchEnvelope(Buffer: buffer, InstanceList: { Instance }): 
 	const _InstanceCount = buffer.readu16(Buffer, Offset)
 	Offset += 2
 
-	const Entries = {} :: { ReceivedBatchPacket }
+	const Entries = {} :: { Types.ReceivedBatchPacket }
 
 	for _ = 1, EntryCount do
 		const ID = buffer.readu16(Buffer, Offset)
@@ -725,13 +440,13 @@ const function UnpackBatchEnvelope(Buffer: buffer, InstanceList: { Instance }): 
 		const EntrySize = buffer.readu16(Buffer, Offset)
 		Offset += 2
 
-		const Args = table.create(ArgCount) :: Args
+		const Args = table.create(ArgCount) :: Types.Args
 		Args.n = ArgCount
 
 		for i = 1, ArgCount do
 			const Tag = buffer.readu8(Buffer, Offset)
 			Offset += 1
-			const Value, NewOffset = DataTypes.Readers[Tag](Buffer, Offset, InstanceList)
+			const Value, NewOffset = BinaryCodec.Readers[Tag](Buffer, Offset, InstanceList)
 			Args[i] = Value
 			Offset = NewOffset
 		end
@@ -747,8 +462,8 @@ const function UnpackBatchEnvelope(Buffer: buffer, InstanceList: { Instance }): 
 	return Entries
 end
 
-const function ReceiveCall(Player: Player?, name: string, Type: NetworkEventType, ...)
-	const CallbackList = GetConnectionsByName(Type, name)
+const function ReceiveCall(Player: Player?, name: string, Type: Types.NetworkEventType, ...)
+	const CallbackList = ConnectionHandler.GetConnectionsByName(Type, name)
 	if not CallbackList then
 		return
 	end
@@ -772,12 +487,12 @@ const function ReceiveCall(Player: Player?, name: string, Type: NetworkEventType
 	end
 end
 
-const function GetSizeOfBatchEvent(name: string, Args: Args): number
+const function GetSizeOfBatchEvent(name: string, Args: Types.Args): number
 	local Size = 4 + #name
 	for i = 1, Args.n do
 		const Arg = Args[i]
 		-- + 1 for tag
-		Size += 1 + DataTypes.GetPayloadSize(DataTypes.GetTagFromValue(Arg), Arg)
+		Size += 1 + BinaryCodec.GetPayloadSize(BinaryCodec.GetTagFromValue(Arg), Arg)
 	end
 	return Size
 end
@@ -794,11 +509,11 @@ const function FireQueuedCalls()
 	const SelectedCalls = {
 		REMOTE_EVENT = {},
 		UREMOTE_EVENT = {},
-	} :: { [RemoteType]: { [Player | "All" | "Server"]: { BatchPacket } } }
+	} :: { [Types.RemoteType]: { [Player | "All" | "Server"]: { Types.BatchPacket } } }
 	local AccumulatedSizes = {
 		REMOTE_EVENT = {},
 		UREMOTE_EVENT = {},
-	} :: { [RemoteType]: { [Player | "All" | "Server"]: number } }
+	} :: { [Types.RemoteType]: { [Player | "All" | "Server"]: number } }
 	const IndexesToRemove = {} :: { number }
 	for Index, Event in BatchQueue do
 		const BufferLength = GetSizeOfBatchEvent(Event.EventName, Event.Args)
@@ -806,13 +521,13 @@ const function FireQueuedCalls()
 		const EventTarget = Event.Target or "Server"
 
 		const ExistingAccumulated = AccumulatedSizes[EventType][EventTarget]
-		if ExistingAccumulated and ExistingAccumulated > BATCHING.MaxBatchSize then
+		if ExistingAccumulated and ExistingAccumulated > Config.Batching.MaxBatchSize then
 			continue
 		end
 
 		const Size = BufferLength / 1024
 		--if the size of the call args is already bigger than the max limit, just send it immediately
-		if Size >= BATCHING.MaxBatchSize then
+		if Size >= Config.Batching.MaxBatchSize then
 			--only remove it from queue if it's bigger than the cap or if it's sent
 			table.insert(IndexesToRemove, Index)
 			-- gotta add FireOptions here so it doesn't try to batch it again at all,
@@ -832,7 +547,7 @@ const function FireQueuedCalls()
 			continue
 		end
 		--if adding the event would exceed the cap, but the event isn't bigger than or as big as the cap, skip it
-		if ExistingAccumulated and ExistingAccumulated + Size > BATCHING.MaxBatchSize then
+		if ExistingAccumulated and ExistingAccumulated + Size > Config.Batching.MaxBatchSize then
 			continue
 		end
 
@@ -845,12 +560,12 @@ const function FireQueuedCalls()
 		end
 
 		const Calls = SelectedCalls[EventType]
-		local CallGroup: { BatchPacket }
+		local CallGroup: { Types.BatchPacket }
 		if Calls[EventTarget] == nil then
 			Calls[EventTarget] = {}
 		end
 		CallGroup = Calls[EventTarget]
-		table.insert(CallGroup, Event :: BatchPacket)
+		table.insert(CallGroup, Event :: Types.BatchPacket)
 	end
 	for index = #IndexesToRemove, 1, -1 do
 		table.remove(BatchQueue, IndexesToRemove[index])
@@ -887,7 +602,7 @@ const function FireQueuedCalls()
 	end
 end
 
-const function OnRemoteEventPacket(Player: Player?, Args: { any }, Type: NetworkEventType)
+const function OnRemoteEventPacket(Player: Player?, Args: { any }, Type: Types.NetworkEventType)
 	--safety first gng
 	if Type ~= "BINDABLE_EVENT" and IS_SERVER and not Player then
 		return
@@ -896,7 +611,7 @@ const function OnRemoteEventPacket(Player: Player?, Args: { any }, Type: Network
 	const Name, DecodedArgs, _ArgCount, InstanceCount = UnpackArgumentsFromNetwork(Args)
 
 	if Name == "__Batch" then
-		if DEBUG.ReceivedPackets and (Type ~= "UREMOTE_EVENT" or not DEBUG.ExcludeUnreliable) then
+		if Config.Debug.ReceivedPackets and (Type ~= "UREMOTE_EVENT" or not Config.Debug.ExcludeUnreliable) then
 			const BufferLength = Args[1] and typeof(Args[1]) == "buffer" and buffer.len(Args[1]) or #Name
 			print(
 				`[Dysconnect (DEBUG)] Received event batch of type "{Type}" and a size of {BufferLength} bytes{InstanceCount > 0 and `, with a total of {InstanceCount} instance{InstanceCount > 1 and "s" or ""}.` or "."}`
@@ -906,7 +621,7 @@ const function OnRemoteEventPacket(Player: Player?, Args: { any }, Type: Network
 		const Entries = UnpackBatchEnvelope(DecodedArgs[1], DecodedArgs[2] or {})
 
 		for _, Entry in Entries do
-			if DEBUG.ReceivedPackets and (Type ~= "UREMOTE_EVENT" or not DEBUG.ExcludeUnreliable) then
+			if Config.Debug.ReceivedPackets and (Type ~= "UREMOTE_EVENT" or not Config.Debug.ExcludeUnreliable) then
 				const BufferLength = GetSizeOfBatchEvent(Entry.EventName, Entry.Args)
 				const NameLength = #Entry.EventName
 				const ArgsLength = math.max(0, BufferLength - NameLength)
@@ -921,7 +636,7 @@ const function OnRemoteEventPacket(Player: Player?, Args: { any }, Type: Network
 		return
 	end
 
-	if DEBUG.ReceivedPackets and (Type ~= "UREMOTE_EVENT" or not DEBUG.ExcludeUnreliable) then
+	if Config.Debug.ReceivedPackets and (Type ~= "UREMOTE_EVENT" or not Config.Debug.ExcludeUnreliable) then
 		const BufferLength = Args[1] and typeof(Args[1]) == "buffer" and buffer.len(Args[1]) or #Name
 		const NameLength = #Name
 		const ArgsLength = math.max(0, BufferLength - NameLength)
@@ -940,8 +655,8 @@ const function OnRemoteFunctionPacket(Player: Player?, Args: { any }): any
 			return
 		end
 
-		if not CheckPlayerRateLimit(Player, "RemoteFunction") then
-			if DEBUG.RateLimitExceeded then
+		if not ExhaustionDetection.CheckPlayerRateLimit(Player, "RemoteFunction") then
+			if Config.Debug.RateLimitExceeded then
 				warn(`[Dysconnect (DEBUG)] Player "{Player.Name}" with ID "{Player.UserId}" is suspected to be exhausting the remote calls rate limit! Cancelling current remote...`)
 			end
 
@@ -951,7 +666,7 @@ const function OnRemoteFunctionPacket(Player: Player?, Args: { any }): any
 
 	const Name, DecodedArgs, _ArgCount, InstanceCount = UnpackArgumentsFromNetwork(Args)
 
-	if DEBUG.ReceivedPackets then
+	if Config.Debug.ReceivedPackets then
 		const BufferLength = Args[1] and typeof(Args[1]) == "buffer" and buffer.len(Args[1]) or 0
 		const NameLength = #Name
 		const ArgsLength = math.max(0, BufferLength - NameLength)
@@ -960,7 +675,7 @@ const function OnRemoteFunctionPacket(Player: Player?, Args: { any }): any
 		)
 	end
 
-	const Meta = GetConnectionsByName("REMOTE_FUNCTION" :: NetworkEventType, Name)
+	const Meta = ConnectionHandler.GetConnectionsByName("REMOTE_FUNCTION" :: Types.NetworkEventType, Name)
 	if not Meta then
 		return
 	end
@@ -983,44 +698,32 @@ const function OnRemoteFunctionPacket(Player: Player?, Args: { any }): any
 		return
 	end
 
-	const CompressedResults = PackArgumentsForNetwork("RFunc", Results) --using a dummy name, ignore
+	const CompressedResults = PackArgumentsForNetwork("_RFunc", Results) --using a dummy name, ignore
 
 	return CompressedResults
 end
 
 const function Destroy()
 	script:ClearAllChildren()
-	for _, Type in Connections do
-		for EventKey, Event in Type do
-			if typeof(Event) == "table" then
-				for Key, _ in Event do
-					Event[Key] = nil
-				end
-				continue
-			end
-			Type[EventKey] = nil
-		end
-	end
+	ConnectionHandler.Destroy()
 end
 
 const function ServerInit()
-	ServerTimeStamp = workspace:GetServerTimeNow()
-	script:SetAttribute("ServerTimeStamp", ServerTimeStamp)
 	game:BindToClose(Destroy)
 
-	local TypeFolder = script:FindFirstChild("Types") :: Folder
-	if not TypeFolder then
-		TypeFolder = Instance.new("Folder")
-		TypeFolder.Name = "Types"
-		TypeFolder.Parent = script
+	local InstanceFolder = script:FindFirstChild("Instances") :: Folder
+	if not InstanceFolder then
+		InstanceFolder = Instance.new("Folder")
+		InstanceFolder.Name = "Instances"
+		InstanceFolder.Parent = script
 	end
 
 	for Name, InstName in NAMING_EQUIVALENTS do
-		local Inst = TypeFolder:FindFirstChild(InstName) :: Instance
+		local Inst = InstanceFolder:FindFirstChild(InstName) :: Instance
 		if not Inst then
 			Inst = Instance.new(InstName)
 			Inst.Name = Name
-			Inst.Parent = TypeFolder
+			Inst.Parent = InstanceFolder
 		end
 		Instances[Name] = Inst
 
@@ -1038,28 +741,25 @@ const function ServerInit()
 		end
 
 		(Inst :: RemoteEvent --[[ | UnreliableRemoteEvent ]]).OnServerEvent:Connect(function(Player: Player, Args: { any })
-			if not CheckPlayerRateLimit(Player, InstName :: "RemoteEvent" | "RemoteFunction" | "UnreliableRemoteEvent") then
-				if DEBUG.RateLimitExceeded then
+			if not ExhaustionDetection.CheckPlayerRateLimit(Player, InstName :: "RemoteEvent" | "RemoteFunction" | "UnreliableRemoteEvent") then
+				if Config.Debug.RateLimitExceeded then
 					warn(`[Dysconnect (DEBUG)] Player "{Player.Name}" with ID "{Player.UserId}" is suspected to be exhausting the remote calls rate limit! Cancelling current remote...`)
 				end
 
 				return
 			end
 
-			OnRemoteEventPacket(Player, Args, Name :: NetworkEventType)
+			OnRemoteEventPacket(Player, Args, Name :: Types.NetworkEventType)
 		end)
 	end
 
-	Players.PlayerRemoving:Connect(function(Player: Player)
-		--cleanup
-		PlayerExhaustionLogs[Player.UserId] = nil
-	end)
+	ExhaustionDetection.Setup()
 
-	Dysconnect.SetConnection("IdAssignment", "REMOTE_EVENT", function(Player: Player)
+	Dysconnect.SetConnection("__IdAssignment", "REMOTE_EVENT", function(Player: Player)
 		const All = {} :: { number | string }
 		local ByteSize = 0
 		local Count = 0
-		for Name, ID in NameToID do
+		for Name, ID in IdProvider.GetObjectIds() do
 			table.insert(All, Name)
 			table.insert(All, ID)
 			Count += 1
@@ -1082,7 +782,7 @@ const function ServerInit()
 			Offset += 2
 		end
 
-		Dysconnect.FireClientConnection(Player, "IdAssignment", "REMOTE_EVENT" :: InvokableType, Packet, Dysconnect.FireOptions({ Batch = false }))
+		Dysconnect.FireClientConnection(Player, "__IdAssignment", "REMOTE_EVENT" :: Types.InvokableType, Packet, Dysconnect.FireOptions({ Batch = false }))
 	end)
 
 	script:SetAttribute("ServerReady", true)
@@ -1091,15 +791,10 @@ const function ServerInit()
 end
 
 const function ClientInit()
-	--wait until server sends the time stamp so it works fine
-	if script:GetAttribute("ServerTimeStamp") == nil then
-		script:GetAttributeChangedSignal("ServerTimeStamp"):Wait()
-	end
-	ServerTimeStamp = script:GetAttribute("ServerTimeStamp") :: number?
-	const EventFolder = script:FindFirstChild("Types") or script:WaitForChild("Types")
+	const InstanceFolder = script:FindFirstChild("Instances") or script:WaitForChild("Instances")
 
 	for Name, _ in NAMING_EQUIVALENTS do
-		Instances[Name] = EventFolder:FindFirstChild(Name) or EventFolder:WaitForChild(Name)
+		Instances[Name] = InstanceFolder:FindFirstChild(Name) or InstanceFolder:WaitForChild(Name)
 
 		if Name == "REMOTE_FUNCTION" then
 			(Instances[Name] :: RemoteFunction).OnClientInvoke = function(Args: { any }): any
@@ -1118,11 +813,11 @@ const function ClientInit()
 		end
 
 		(Instances[Name] :: RemoteEvent --[[ | UnreliableRemoteEvent ]]).OnClientEvent:Connect(function(Args: { any })
-			OnRemoteEventPacket(nil, Args, Name :: NetworkEventType)
+			OnRemoteEventPacket(nil, Args, Name :: Types.NetworkEventType)
 		end)
 	end
 
-	Dysconnect.SetConnection("IdAssignment", "REMOTE_EVENT", function(Packet: buffer)
+	Dysconnect.SetConnection("__IdAssignment", "REMOTE_EVENT", function(Packet: buffer)
 		const Count = buffer.readu16(Packet, 0)
 		local Offset = 2
 		for _ = 1, Count do
@@ -1143,41 +838,24 @@ const function ClientInit()
 end
 
 --[=[
-	@interface InitConfig
-	@within Dysconnect
-	
-	Configurations to apply to the network service when initializing.
-	
-	.DebugConfig DEBUG -- Read [DEBUG].
-	.ExhaustionDetectionConfig EXHAUSTION_DETECTION -- Read [EXHAUSTION_DETECTION].
-	.Batching BATCHING -- Read [BATCHING].
-]=]
-type InitConfig = {
-	DebugConfig: typeof(DEBUG)?,
-	ExhaustionDetectionConfig: typeof(EXHAUSTION_DETECTION)?,
-	Batching: typeof(BATCHING)?,
-}
---[=[
 	@within Dysconnect
 	
 	Initializes the networking system in the current environment.
 	
 	@param config InitConfig -- Read [InitConfig].
 ]=]
-function Dysconnect.Init(config: InitConfig?)
-	for Name, _ in NAMING_EQUIVALENTS do
-		Connections[Name :: EventType] = {}
-	end
+function Dysconnect.Init(config: Config.InitConfig?)
+	ConnectionHandler.Setup(NAMING_EQUIVALENTS)
 
 	if config then
 		if config.DebugConfig then
-			DEBUG = table.freeze(WriteMissingTableValues(config.DebugConfig, DEBUG))
+			Config.Debug = table.freeze(WriteMissingTableValues(config.DebugConfig, Config.Debug))
 		end
 		if config.ExhaustionDetectionConfig then
-			EXHAUSTION_DETECTION = table.freeze(WriteMissingTableValues(config.ExhaustionDetectionConfig, EXHAUSTION_DETECTION))
+			Config.ExhaustionDetection = table.freeze(WriteMissingTableValues(config.ExhaustionDetectionConfig, Config.ExhaustionDetection))
 		end
 		if config.Batching then
-			BATCHING = table.freeze(WriteMissingTableValues(config.Batching, BATCHING))
+			Config.Batching = table.freeze(WriteMissingTableValues(config.Batching, Config.Batching))
 		end
 	end
 
@@ -1196,8 +874,17 @@ function Dysconnect.Init(config: InitConfig?)
 			script:GetAttributeChangedSignal("ServerReady"):Wait()
 		end
 
-		Dysconnect.FireServerConnection("IdAssignment", "REMOTE_EVENT", Dysconnect.FireOptions({ Batch = false }))
+		Dysconnect.FireServerConnection("__IdAssignment", "REMOTE_EVENT", Dysconnect.FireOptions({ Batch = false }))
 	end
+end
+
+const function CreateMissingID(name: string)
+	if IdProvider.GetIDByObject(name) ~= nil then
+		return
+	end
+
+	const NewId = GenerateIdForName(name)
+	Dysconnect.FireAllClientConnection("__IdAssignment", "REMOTE_EVENT", CreateMissingIdBuffer(name, NewId), Dysconnect.FireOptions({ Batch = false }))
 end
 
 --[=[
@@ -1212,59 +899,34 @@ end
 	
 	@return Connection -- The set connection for further usage and cleanup.
 ]=]
-function Dysconnect.SetConnection(name: string, Type: EventType, Callback: Callback, Predicate: Predicate?): Connection
+function Dysconnect.SetConnection(name: string, Type: Types.EventType, Callback: Types.Callback, Predicate: Types.Predicate?): Types.Connection
 	if #name > 127 then
 		warn(`[Dysconnect.SetConnection()] Can't assign connection with name "{name}" because it's too long! Try to shorten it a bit.`)
 		return {
 			Connected = false,
-		} :: Connection
+		} :: Types.Connection
 	end
 
 	-- Dysconnect.WaitForInit()
 	--only wait for the connection table to appear instead
-	if Connections[Type] == nil and NAMING_EQUIVALENTS[Type] ~= nil then
-		repeat
-			task.wait()
-		until Connections[Type]
-	end
+	ConnectionHandler.WaitForConnectionType(Type)
 
 	if IS_SERVER then
-		if NameToID[name] == nil then
-			const NewId = GenerateIdForName(name)
-			const ByteSize = 5 + #name -- 2 bytes (ID count) + 1 byte (name length) + Name length + 2 bytes (ID)
-			const Packet = buffer.create(ByteSize)
-			buffer.writeu16(Packet, 0, 1)
-			buffer.writeu8(Packet, 2, #name)
-			buffer.writestring(Packet, 3, name)
-			buffer.writeu16(Packet, 3 + #name, NewId)
-			Dysconnect.FireAllClientConnection("IdAssignment", "REMOTE_EVENT", Packet, Dysconnect.FireOptions({ Batch = false }))
-		end
+		CreateMissingID(name)
 	end
 
-	if Connections[Type][name] == nil and Type ~= "REMOTE_FUNCTION" then
-		Connections[Type][name] = {}
-	end
-	if Type == "REMOTE_FUNCTION" then
-		Connections[Type][name] = {
-			Callback = Callback :: Callback,
-			Predicate = Predicate,
-		}
-	else
-		Connections[Type][name][Callback :: Callback] = {
-			Predicate = Predicate,
-		}
-	end
+	ConnectionHandler.Create(Type, name, Callback, Predicate)
 
 	return setmetatable({
 		Connected = true,
 		Type = Type,
 		Name = name,
 		Callback = Callback,
-	}, Connection) :: Connection
+	}, ConnectionHandler.MetaConnection) :: Types.Connection
 end
 
-const function AddToQueue(player: (Player | { Player } | "All")?, name: string, Type: RemoteType, Args: Args)
-	if DEBUG.SentPackets then
+const function AddToQueue(player: (Player | { Player } | "All")?, name: string, Type: Types.RemoteType, Args: Types.Args)
+	if Config.Debug.SentPackets then
 		print(`[Dysconnect (DEBUG)] Added event of type "{Type}" with name {name} to batch queue.\n{debug.traceback()}`)
 	end
 
@@ -1302,7 +964,7 @@ end
 	
 	@return any | nil -- If a [RemoteFunction] is invoked using this, its returned values will be returned here.
 ]=]
-function Dysconnect.FireClientConnection(target: Player | { Player }, name: string, Type: InvokableType, ...): any?
+function Dysconnect.FireClientConnection(target: Player | { Player }, name: string, Type: Types.InvokableType, ...): any?
 	if not target then
 		warn(`[Dysconnect.FireClientConnection()] No target(s) for the event was/were provided!`, debug.traceback())
 		return
@@ -1331,26 +993,17 @@ function Dysconnect.FireClientConnection(target: Player | { Player }, name: stri
 		return
 	end
 
-	if NameToID[name] == nil then
-		const NewId = GenerateIdForName(name)
-		const ByteSize = 5 + #name -- 2 bytes (ID count) + 1 byte (name length) + Name length + 2 bytes (ID)
-		const Packet = buffer.create(ByteSize)
-		buffer.writeu16(Packet, 0, 1)
-		buffer.writeu8(Packet, 2, #name)
-		buffer.writestring(Packet, 3, name)
-		buffer.writeu16(Packet, 3 + #name, NewId)
-		Dysconnect.FireAllClientConnection("IdAssignment", "REMOTE_EVENT", Packet, Dysconnect.FireOptions({ Batch = false }))
-	end
+	CreateMissingID(name)
 
 	const Arguments = table.pack(...) --using table.pack() to add `Arguments.n`
 
 	const ShouldBatch, CleanArgs = ExtractFireOptions(Arguments)
 	if ShouldBatch then
-		AddToQueue(target, name, Type :: RemoteType, CleanArgs :: Args)
+		AddToQueue(target, name, Type :: Types.RemoteType, CleanArgs :: Types.Args)
 		return
 	end
 
-	const CompressedArguments = PackArgumentsForNetwork(name, CleanArgs :: Args)
+	const CompressedArguments = PackArgumentsForNetwork(name, CleanArgs :: Types.Args)
 
 	if typeof(target) == "table" then
 		const Results = {}
@@ -1373,7 +1026,7 @@ end
 	@param Type RemoteType -- The type of the event (Reliable / Unreliable).
 	@param ... any -- Any arguments to pass to the event.
 ]=]
-function Dysconnect.FireAllClientConnection(name: string, Type: RemoteType, ...)
+function Dysconnect.FireAllClientConnection(name: string, Type: Types.RemoteType, ...)
 	if not name then
 		warn(`[Dysconnect.FireAllClientConnection()] No name was provided for the event!`, debug.traceback())
 		return
@@ -1402,28 +1055,19 @@ function Dysconnect.FireAllClientConnection(name: string, Type: RemoteType, ...)
 		return
 	end
 
-	if NameToID[name] == nil then
-		const NewId = GenerateIdForName(name)
-		const ByteSize = 5 + #name -- 2 bytes (ID count) + 1 byte (name length) + Name length + 2 bytes (ID)
-		const Packet = buffer.create(ByteSize)
-		buffer.writeu16(Packet, 0, 1)
-		buffer.writeu8(Packet, 2, #name)
-		buffer.writestring(Packet, 3, name)
-		buffer.writeu16(Packet, 3 + #name, NewId)
-		Dysconnect.FireAllClientConnection("IdAssignment", "REMOTE_EVENT", Packet, Dysconnect.FireOptions({ Batch = false }))
-	end
+	CreateMissingID(name)
 
 	const Arguments = table.pack(...)
 
 	const ShouldBatch, CleanArgs = ExtractFireOptions(Arguments)
 	if ShouldBatch then
-		AddToQueue("All", name, Type, CleanArgs :: Args)
+		AddToQueue("All", name, Type, CleanArgs :: Types.Args)
 		return
 	end
 
-	instance:FireAllClients(PackArgumentsForNetwork(name, CleanArgs :: Args))
+	instance:FireAllClients(PackArgumentsForNetwork(name, CleanArgs :: Types.Args))
 
-	if DEBUG.SentPackets then
+	if Config.Debug.SentPackets then
 		print(`[Dysconnect (DEBUG)] Fired event of type "{Type}" with name "{name}".\n{debug.traceback()}`)
 	end
 end
@@ -1440,7 +1084,7 @@ end
 	
 	@return any | nil -- If a [RemoteFunction] is invoked using this, its returned values will be returned here.
 ]=]
-function Dysconnect.FireServerConnection(name: string, Type: InvokableType, ...): any | nil
+function Dysconnect.FireServerConnection(name: string, Type: Types.InvokableType, ...): any | nil
 	if not name then
 		warn(`[Dysconnect.FireServerConnection()] No name was provided for the event!`, debug.traceback())
 		return
@@ -1467,13 +1111,13 @@ function Dysconnect.FireServerConnection(name: string, Type: InvokableType, ...)
 	const Arguments = table.pack(...)
 
 	if Type == "REMOTE_FUNCTION" then
-		if DEBUG.SentPackets then
+		if Config.Debug.SentPackets then
 			print(`[Dysconnect (DEBUG)] Fired event of type "REMOTE_FUNCTION" with name "{name}".\n{debug.traceback()}`)
 		end
 
 		const Results = (instance :: RemoteFunction):InvokeServer(PackArgumentsForNetwork(name, Arguments))
 
-		if DEBUG.ReceivedPackets then
+		if Config.Debug.ReceivedPackets then
 			const BufferLength = Results[1] and typeof(Results[1]) == "buffer" and buffer.len(Results[1]) or 0
 			print(`[Dysconnect (DEBUG)] Received back results from a "REMOTE_FUNCTION" with name "{name}" and a size of {BufferLength} bytes.`)
 		end
@@ -1485,15 +1129,15 @@ function Dysconnect.FireServerConnection(name: string, Type: InvokableType, ...)
 
 	const ShouldBatch, CleanArgs = ExtractFireOptions(Arguments)
 	if ShouldBatch then
-		AddToQueue(nil, name, Type, CleanArgs :: Args)
+		AddToQueue(nil, name, Type, CleanArgs :: Types.Args)
 		return
 	end
 
-	if DEBUG.SentPackets then
+	if Config.Debug.SentPackets then
 		print(`[Dysconnect (DEBUG)] Fired event of type "{Type}" with name "{name}".\n{debug.traceback()}`)
 	end
 
-	(instance :: RemoteEvent --[[ | UnreliableRemoteEvent ]]):FireServer(PackArgumentsForNetwork(name, CleanArgs :: Args))
+	(instance :: RemoteEvent --[[ | UnreliableRemoteEvent ]]):FireServer(PackArgumentsForNetwork(name, CleanArgs :: Types.Args))
 
 	return
 end
@@ -1528,10 +1172,9 @@ function Dysconnect.FireConnection(name: string, ...)
 		return
 	end
 
-	const Arguments = table.pack(...)
-	const CompressedArguments = PackArgumentsForNetwork(name, Arguments)
+	const CompressedArguments = PackArgumentsForNetwork(name, table.pack(...))
 
-	if DEBUG.SentPackets then
+	if Config.Debug.SentPackets then
 		print(`[Dysconnect (DEBUG)] Fired event of type "BINDABLE_EVENT" with name "{name}".\n{debug.traceback()}`)
 	end
 
@@ -1560,5 +1203,4 @@ function Dysconnect.IsLive(): boolean
 	return ServiceLive
 end
 
-table.freeze(Connection)
 return table.freeze(Dysconnect)

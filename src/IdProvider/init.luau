@@ -1,4 +1,5 @@
 --!strict
+--!optimize 2
 
 const MinHeap = require("@self/MinHeap")
 
@@ -74,6 +75,14 @@ function IdProvider.GetIDByObject(Object: any): number?
 	end
 
 	return IDs[Object]
+end
+
+function IdProvider.GetIdObjects(): { [number]: string }
+	return ReverseIDs
+end
+
+function IdProvider.GetObjectIds(): { [string]: number }
+	return IDs
 end
 
 return IdProvider
