@@ -1,18 +1,10 @@
 --!strict
 --!optimize 2
 
-const RunService = game:GetService("RunService")
-
 const IdAllocator = require("../Net/IdAllocator")
 
-const IS_SERVER = RunService:IsServer()
-
 const function GenerateIdForName(Name: string, Override: number?): number
-	if IS_SERVER then
-		return IdAllocator.Register(Name, Override)
-	end
-
-	return Override or -1
+	return IdAllocator.Register(Name, Override)
 end
 
 const function GetNameFromID(ID: number): string

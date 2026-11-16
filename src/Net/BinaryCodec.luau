@@ -8,7 +8,7 @@
 const HttpService = game:GetService("HttpService")
 
 const BinaryCodec = {
-	Enum = table.freeze({
+	Enum = {
 		NIL = 0,
 		boolean = 1,
 		Int8 = 2,
@@ -34,7 +34,7 @@ const BinaryCodec = {
 		TweenInfo = 22,
 		Instance = 23,
 		Map = 24,
-	}) :: { [string]: number },
+	} :: { [string]: number },
 }
 
 --setting the size of every type beforehand to not have to calculate it unless it's necessary

@@ -38,12 +38,13 @@ const function AddToQueue(player: (Player | { Player } | "All")?, name: string, 
 	})
 end
 
+const Entrypoint = script.Parent.Parent
 const function FireQueuedCalls()
 	if #BatchQueue == 0 then
 		return
 	end
 
-	if not IS_SERVER and not script:GetAttribute("ClientReady") then
+	if not IS_SERVER and not Entrypoint:GetAttribute("ClientReady") then
 		return
 	end
 

@@ -147,13 +147,16 @@ const function ClientIdAssignment(Packet: buffer)
 		const ID = buffer.readu16(Packet, Offset)
 		Offset += 2
 
+		if RESERVED_IDS[Name] == ID or IdAllocator.GetIDByObject(Name) == ID then
+			continue
+		end
 		IdentifierRegistry.GenerateIdForName(Name, ID)
 	end
 
 	script:SetAttribute("ClientReady", true)
 end
 
-const function ServerInit()
+const function ServerInit(): { [Types.EventType]: Instance }
 	game:BindToClose(Destroy)
 
 	local InstanceFolder = script:FindFirstChild("Instances") :: Folder
@@ -208,7 +211,7 @@ const function ServerInit()
 	return Instances
 end
 
-const function ClientInit()
+const function ClientInit(): { [Types.EventType]: Instance }
 	const InstanceFolder = script:FindFirstChild("Instances") or script:WaitForChild("Instances")
 
 	const Instances = {} :: { [Types.EventType]: Instance }
