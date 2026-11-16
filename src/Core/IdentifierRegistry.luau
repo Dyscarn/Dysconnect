@@ -11,7 +11,7 @@ const function GenerateIdForName(Name: string, Override: number?): number
 	if IS_SERVER then
 		return IdAllocator.Register(Name, Override)
 	end
-	
+
 	return Override or -1
 end
 

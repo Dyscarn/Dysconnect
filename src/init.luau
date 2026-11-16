@@ -204,7 +204,7 @@ const function ServerInit()
 	script:SetAttribute("ServerReady", true)
 
 	print("[Dysconnect.Init()] Initialized networking on server successfully!")
-	
+
 	return Instances
 end
 
@@ -237,7 +237,7 @@ const function ClientInit()
 	end
 
 	print("[Dysconnect.Init()] Initialized networking on client successfully!")
-	
+
 	return Instances
 end
 
@@ -264,16 +264,12 @@ const function Init(config: Config.InitConfig?)
 		end
 	end
 
-	const Instances =
-		if IS_SERVER then
-			ServerInit()
-		else
-			ClientInit()
+	const Instances = if IS_SERVER then ServerInit() else ClientInit()
 
 	RunService.PostSimulation:Connect(BatchDispatcher.FireQueuedCalls)
 
 	Transmission.GoLive(Instances)
-	
+
 	Transmission.SetConnection("__IdAssignment", "REMOTE_EVENT", if IS_SERVER then ServerIdAssignment else ClientIdAssignment)
 
 	if not IS_SERVER then
