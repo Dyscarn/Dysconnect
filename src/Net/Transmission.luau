@@ -6,7 +6,7 @@ const RunService = game:GetService("RunService")
 const PacketDispatcher = require("../Core/PacketDispatcher")
 const Types = require("../Types")
 const Config = require("../Config")
-const IdAllocator = require("./IdAllocator")
+const IdentifierAllocator = require("./IdentifierAllocator")
 const ConnectionRegistry = require("./ConnectionRegistry")
 const PacketSerializer = require("../Core/PacketSerializer")
 
@@ -56,14 +56,14 @@ end
 
 const function GenerateIdForName(Name: string, Override: number?): number
 	if IS_SERVER then
-		return IdAllocator.Register(Name, Override)
+		return IdentifierAllocator.Register(Name, Override)
 	end
 
 	return Override or -1
 end
 
 const function CreateMissingID(name: string)
-	if IdAllocator.GetIDByObject(name) ~= nil then
+	if IdentifierAllocator.GetIDByObject(name) ~= nil then
 		return
 	end
 

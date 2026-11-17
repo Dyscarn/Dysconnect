@@ -55,7 +55,7 @@ const RunService = game:GetService("RunService")
 
 const Types = require("@self/Types")
 const Config = require("@self/Config")
-const IdAllocator = require("@self/Net/IdAllocator")
+const IdentifierAllocator = require("@self/Net/IdentifierAllocator")
 const Transmission = require("@self/Net/Transmission")
 const BatchDispatcher = require("@self/Core/BatchDispatcher")
 const PacketDispatcher = require("@self/Core/PacketDispatcher")
@@ -109,7 +109,7 @@ const function ServerIdAssignment(Player: Player)
 	const All = {} :: { number | string }
 	local ByteSize = 0
 	local Count = 0
-	for Name, ID in IdAllocator.GetObjectIds() do
+	for Name, ID in IdentifierAllocator.GetObjectIds() do
 		table.insert(All, Name)
 		table.insert(All, ID)
 		Count += 1
@@ -147,7 +147,7 @@ const function ClientIdAssignment(Packet: buffer)
 		const ID = buffer.readu16(Packet, Offset)
 		Offset += 2
 
-		if RESERVED_IDS[Name] == ID or IdAllocator.GetIDByObject(Name) == ID then
+		if RESERVED_IDS[Name] == ID or IdentifierAllocator.GetIDByObject(Name) == ID then
 			continue
 		end
 		IdentifierRegistry.GenerateIdForName(Name, ID)

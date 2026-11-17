@@ -1,14 +1,14 @@
 --!strict
 --!optimize 2
 
-const IdAllocator = require("../Net/IdAllocator")
+const IdentifierAllocator = require("../Net/IdentifierAllocator")
 
 const function GenerateIdForName(Name: string, Override: number?): number
-	return IdAllocator.Register(Name, Override)
+	return IdentifierAllocator.Register(Name, Override)
 end
 
 const function GetNameFromID(ID: number): string
-	local Name = IdAllocator.GetObjectByID(ID)
+	local Name = IdentifierAllocator.GetObjectByID(ID)
 
 	if Name == nil then
 		error(`[Dysconnect] Failed name discovery for ID {ID}!`)
@@ -17,7 +17,7 @@ const function GetNameFromID(ID: number): string
 	return Name
 end
 const function GetIDFromName(Name: string): number
-	local ID = IdAllocator.GetIDByObject(Name)
+	local ID = IdentifierAllocator.GetIDByObject(Name)
 
 	if ID == nil then
 		error(`[Dysconnect] Failed name discovery for name "{Name}"!`)

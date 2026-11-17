@@ -12,10 +12,10 @@ const FreeIds = MinHeap.new()
 local NextId = 3
 
 --[=[
-	@class IdAllocator
+	@class IdentifierAllocator
 	@private
 ]=]
-const IdAllocator = {}
+const IdentifierAllocator = {}
 
 const function GenerateID(): number
 	--reuse lowest free ids
@@ -35,7 +35,7 @@ const function GenerateID(): number
 	return Id
 end
 
-function IdAllocator.Register(Object: string, IdOverride: number?): number
+function IdentifierAllocator.Register(Object: string, IdOverride: number?): number
 	const Id = IdOverride or GenerateID()
 
 	if ReverseIDs[Id] then
@@ -58,7 +58,7 @@ function IdAllocator.Register(Object: string, IdOverride: number?): number
 	return Id
 end
 
-function IdAllocator.Unregister(ID: number)
+function IdentifierAllocator.Unregister(ID: number)
 	const Object = ReverseIDs[ID]
 
 	if Object == nil then
@@ -71,7 +71,7 @@ function IdAllocator.Unregister(ID: number)
 	FreeIds:Push(ID)
 end
 
-function IdAllocator.GetObjectByID(ID: number): string?
+function IdentifierAllocator.GetObjectByID(ID: number): string?
 	if not ID then
 		return nil
 	end
@@ -79,7 +79,7 @@ function IdAllocator.GetObjectByID(ID: number): string?
 	return ReverseIDs[ID]
 end
 
-function IdAllocator.GetIDByObject(Object: any): number?
+function IdentifierAllocator.GetIDByObject(Object: any): number?
 	if not Object then
 		return nil
 	end
@@ -87,12 +87,12 @@ function IdAllocator.GetIDByObject(Object: any): number?
 	return IDs[Object]
 end
 
-function IdAllocator.GetIdObjects(): { [number]: string }
+function IdentifierAllocator.GetIdObjects(): { [number]: string }
 	return ReverseIDs
 end
 
-function IdAllocator.GetObjectIds(): { [string]: number }
+function IdentifierAllocator.GetObjectIds(): { [string]: number }
 	return IDs
 end
 
-return table.freeze(IdAllocator)
+return table.freeze(IdentifierAllocator)
