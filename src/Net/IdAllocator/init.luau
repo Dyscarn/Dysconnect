@@ -1,4 +1,5 @@
 --!strict
+--!optimize 2
 
 const MinHeap = require("@self/MinHeap")
 
@@ -11,10 +12,10 @@ const FreeIds = MinHeap.new()
 local NextId = 3
 
 --[=[
-	@class IdProvider
+	@class IdAllocator
 	@private
 ]=]
-const IdProvider = {}
+const IdAllocator = {}
 
 const function GenerateID(): number
 	--reuse lowest free ids
@@ -34,11 +35,21 @@ const function GenerateID(): number
 	return Id
 end
 
-function IdProvider.Register(Object: string, IdOverride: number?): number
+function IdAllocator.Register(Object: string, IdOverride: number?): number
 	const Id = IdOverride or GenerateID()
 
 	if ReverseIDs[Id] then
-		error(`ID {Id} already registered Preventing registration...`)
+		if ReverseIDs[Id] == Object then
+			return Id
+		end
+		error(`ID {Id} already registered! Preventing registration...`)
+	end
+
+	if IDs[Object] then
+		if IDs[Object] == Id then
+			return Id
+		end
+		error(`Name "{Object}" already registered with ID {IDs[Object]}! Preventing registration...`)
 	end
 
 	ReverseIDs[Id] = Object
@@ -47,7 +58,7 @@ function IdProvider.Register(Object: string, IdOverride: number?): number
 	return Id
 end
 
-function IdProvider.Unregister(ID: number)
+function IdAllocator.Unregister(ID: number)
 	const Object = ReverseIDs[ID]
 
 	if Object == nil then
@@ -60,7 +71,7 @@ function IdProvider.Unregister(ID: number)
 	FreeIds:Push(ID)
 end
 
-function IdProvider.GetObjectByID(ID: number): string?
+function IdAllocator.GetObjectByID(ID: number): string?
 	if not ID then
 		return nil
 	end
@@ -68,7 +79,7 @@ function IdProvider.GetObjectByID(ID: number): string?
 	return ReverseIDs[ID]
 end
 
-function IdProvider.GetIDByObject(Object: any): number?
+function IdAllocator.GetIDByObject(Object: any): number?
 	if not Object then
 		return nil
 	end
@@ -76,4 +87,12 @@ function IdProvider.GetIDByObject(Object: any): number?
 	return IDs[Object]
 end
 
-return IdProvider
+function IdAllocator.GetIdObjects(): { [number]: string }
+	return ReverseIDs
+end
+
+function IdAllocator.GetObjectIds(): { [string]: number }
+	return IDs
+end
+
+return table.freeze(IdAllocator)
