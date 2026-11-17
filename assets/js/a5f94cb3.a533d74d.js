@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkdocs=self.webpackChunkdocs||[]).push([[992],{1010:e=>{e.exports=JSON.parse('{"functions":[],"properties":[],"types":[],"name":"Config","desc":"Configuration container for Dysconnect.","source":{"line":8,"path":"src/Config.luau"}}')}}]);

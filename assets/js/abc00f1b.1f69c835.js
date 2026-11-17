@@ -1,0 +1,1 @@
+"use strict";(self.webpackChunkdocs=self.webpackChunkdocs||[]).push([[216],{796:e=>{e.exports=JSON.parse('{"functions":[],"properties":[],"types":[],"name":"IdentifierAllocator","desc":"","private":true,"source":{"line":18,"path":"src/Net/IdentifierAllocator/init.luau"}}')}}]);
