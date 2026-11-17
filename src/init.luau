@@ -245,6 +245,7 @@ const function ClientInit(): { [Types.EventType]: Instance }
 end
 
 --[=[
+	@function Init
 	@within Dysconnect
 	
 	Initializes the networking system in the current environment.

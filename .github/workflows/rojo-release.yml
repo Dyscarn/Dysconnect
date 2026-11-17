@@ -18,6 +18,18 @@ jobs:
       - name: Setup Rokit
         uses: CompeyDev/setup-rokit@v0.2.1
 
+      - name: Update Wally version
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+
+          sed -i -E \
+            "s/^version = \".*\"/version = \"$VERSION\"/" \
+            wally.toml
+
+          echo "Publishing Wally version $VERSION"
+
       - name: Build Roblox model
         run: rojo build default.project.json -o Dysconnect.rbxm
 
@@ -26,3 +38,9 @@ jobs:
         with:
           files: Dysconnect.rbxm
           fail_on_unmatched_files: true
+
+      - name: Publish to Wally
+        env:
+          WALLY_AUTH_TOKEN: ${{ secrets.WALLY_AUTH_TOKEN }}
+        run: |
+          wally publish --token "$WALLY_AUTH_TOKEN"
