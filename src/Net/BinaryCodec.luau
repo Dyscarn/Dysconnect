@@ -7,19 +7,33 @@
 
 const HttpService = game:GetService("HttpService")
 
+--common tags on their own var
+const TAG_NIL = 0
+const TAG_INT8 = 2
+const TAG_INT16 = 3
+const TAG_INT32 = 4
+const TAG_FLOAT32 = 5
+const TAG_FLOAT64 = 6
+const TAG_JSON = 8
+const TAG_BUFFER = 9
+const TAG_STRING = 10
+const TAG_COLORSEQUENCE = 20
+const TAG_NUMBERSEQUENCE = 21
+const TAG_MAP = 24
+
 const BinaryCodec = {
 	Enum = {
-		NIL = 0,
+		NIL = TAG_NIL,
 		boolean = 1,
-		Int8 = 2,
-		Int16 = 3,
-		Int32 = 4,
-		Float32 = 5,
-		Float64 = 6,
+		Int8 = TAG_INT8,
+		Int16 = TAG_INT16,
+		Int32 = TAG_INT32,
+		Float32 = TAG_FLOAT32,
+		Float64 = TAG_FLOAT64,
 		Vector3 = 7,
-		JSON = 8,
-		buffer = 9,
-		string = 10,
+		JSON = TAG_JSON,
+		buffer = TAG_BUFFER,
+		string = TAG_STRING,
 		CFrame = 11,
 		Vector2 = 12,
 		Color3 = 13,
@@ -29,35 +43,41 @@ const BinaryCodec = {
 		NumberRange = 17,
 		UDim = 18,
 		DateTime = 19,
-		ColorSequence = 20,
-		NumberSequence = 21,
+		ColorSequence = TAG_COLORSEQUENCE,
+		NumberSequence = TAG_NUMBERSEQUENCE,
 		TweenInfo = 22,
 		Instance = 23,
-		Map = 24,
+		Map = TAG_MAP,
+		Vector2int16 = 25,
+		Vector3int16 = 26,
 	} :: { [string]: number },
 }
 
+const ENUM = BinaryCodec.Enum
+
 --setting the size of every type beforehand to not have to calculate it unless it's necessary
 const FIXED_SIZES = table.freeze({
-	[BinaryCodec.Enum.NIL] = 0,
-	[BinaryCodec.Enum.boolean] = 1,
-	[BinaryCodec.Enum.Int8] = 1,
-	[BinaryCodec.Enum.Int16] = 2,
-	[BinaryCodec.Enum.Int32] = 4,
-	[BinaryCodec.Enum.Float32] = 4,
-	[BinaryCodec.Enum.Float64] = 8,
-	[BinaryCodec.Enum.Vector3] = 12,
-	[BinaryCodec.Enum.CFrame] = 28,
-	[BinaryCodec.Enum.Vector2] = 8,
-	[BinaryCodec.Enum.Color3] = 12,
-	[BinaryCodec.Enum.UDim2] = 16,
-	[BinaryCodec.Enum.BrickColor] = 2,
-	[BinaryCodec.Enum.Rect] = 16,
-	[BinaryCodec.Enum.NumberRange] = 8,
-	[BinaryCodec.Enum.UDim] = 8,
-	[BinaryCodec.Enum.DateTime] = 8,
-	[BinaryCodec.Enum.TweenInfo] = 16,
-	[BinaryCodec.Enum.Instance] = 2,
+	[TAG_NIL] = 0,
+	[ENUM.boolean] = 1,
+	[TAG_INT8] = 1,
+	[TAG_INT16] = 2,
+	[TAG_INT32] = 4,
+	[TAG_FLOAT32] = 4,
+	[TAG_FLOAT64] = 8,
+	[ENUM.Vector3] = 12,
+	[ENUM.CFrame] = 28,
+	[ENUM.Vector2] = 8,
+	[ENUM.Color3] = 12,
+	[ENUM.UDim2] = 16,
+	[ENUM.BrickColor] = 2,
+	[ENUM.Rect] = 16,
+	[ENUM.NumberRange] = 8,
+	[ENUM.UDim] = 8,
+	[ENUM.DateTime] = 8,
+	[ENUM.TweenInfo] = 16,
+	[ENUM.Instance] = 2,
+	[ENUM.Vector2int16] = 4,
+	[ENUM.Vector3int16] = 6,
 }) :: { number }
 
 --tweeninfo stuffs
@@ -89,147 +109,142 @@ const function IsNumberBetweenBounds(Value: number, Minimum: number, Maximum: nu
 	return Value >= Minimum and Value <= Maximum
 end
 
-const function IsNumberAnInt8(Value: number): boolean
-	return IsNumberBetweenBounds(Value, -128, 127) -- signed:  -(2^8) / 2 ; (2^8) / 2 - 1
-end
-
-const function IsNumberAnInt16(Value: number): boolean
-	return IsNumberBetweenBounds(Value, -32_768, 32_767) -- signed:  -(2^16) / 2 ; (2^16) / 2 - 1
-end
-
-const function IsNumberAnInt32(Value: number): boolean
-	return IsNumberBetweenBounds(Value, -2_147_483_648, 2_147_483_647) -- signed:  -(2^32) / 2 ; (2^32) / 2 - 1
-end
-
 const function IsHighPrecisionFloat(value: number): boolean
-	return math.abs(value) > 1e4 or (value % 1 ~= 0 and value * 1000 % 1 ~= 0)
+	--making a dummy buffer to test if the value remains equal is a lot
+	--more precise than any other calculations i could come up with
+	const dummy = buffer.create(4)
+	buffer.writef32(dummy, 0, value)
+	return buffer.readf32(dummy, 0) ~= value
 end
 
-function BinaryCodec.GetTagFromValue(Value: any): number
+const function GetTagFromValue(Value: any): number
 	if Value == nil then
-		return BinaryCodec.Enum.NIL
+		return TAG_NIL
 	end
 
 	const Type = typeof(Value)
 
-	if BinaryCodec.Enum[Type] then
-		return BinaryCodec.Enum[Type]
-	end
-
 	if Type == "number" then
 		if not IsNumberAnInt(Value) then
 			if IsHighPrecisionFloat(Value) then
-				return BinaryCodec.Enum.Float64
+				return TAG_FLOAT64
 			end
 
-			return BinaryCodec.Enum.Float32
+			return TAG_FLOAT32
 		end
 
-		if IsNumberAnInt8(Value) then
-			return BinaryCodec.Enum.Int8
+		if IsNumberBetweenBounds(Value, -128, 127) then -- signed:  -(2^8) / 2 ; (2^8) / 2 - 1
+			return TAG_INT8
 		end
 
-		if IsNumberAnInt16(Value) then
-			return BinaryCodec.Enum.Int16
+		if IsNumberBetweenBounds(Value, -32_768, 32_767) then -- signed:  -(2^16) / 2 ; (2^16) / 2 - 1
+			return TAG_INT16
 		end
 
-		if IsNumberAnInt32(Value) then
-			return BinaryCodec.Enum.Int32
+		if IsNumberBetweenBounds(Value, -2_147_483_648, 2_147_483_647) then -- signed:  -(2^32) / 2 ; (2^32) / 2 - 1
+			return TAG_INT32
 		end
 
+		--f64
 		if IsHighPrecisionFloat(Value) then
-			return BinaryCodec.Enum.Float64
+			return TAG_FLOAT64
 		end
 
-		return BinaryCodec.Enum.Float32
+		return TAG_FLOAT32
 	end
 
 	if Type == "table" then
-		return BinaryCodec.Enum.Map
+		return TAG_MAP
 	end
 
-	return BinaryCodec.Enum.JSON
-end
+	if ENUM[Type] then
+		return ENUM[Type]
+	end
 
-function BinaryCodec.GetPayloadSize(tag: number, value: any): number
+	return TAG_JSON
+end
+BinaryCodec.GetTagFromValue = GetTagFromValue
+
+const function GetPayloadSize(tag: number, value: any): number
 	--if it has a fixed size, return that
 	if FIXED_SIZES[tag] then
 		return FIXED_SIZES[tag]
 	end
 
-	if tag == BinaryCodec.Enum.Map then
+	if tag == TAG_MAP then
 		--yuh you kinda get the point
 		--iterate through every item blah blah add their size to the total blah blah BORING.
 		local total = 2
 		for Key, Value in value do
-			const KeyTag = BinaryCodec.GetTagFromValue(Key)
-			const ValueTag = BinaryCodec.GetTagFromValue(Value)
+			const KeyTag = GetTagFromValue(Key)
+			const ValueTag = GetTagFromValue(Value)
 
-			total += (1 + BinaryCodec.GetPayloadSize(KeyTag, Key))
-			total += (1 + BinaryCodec.GetPayloadSize(ValueTag, Value))
+			total += (1 + GetPayloadSize(KeyTag, Key))
+			total += (1 + GetPayloadSize(ValueTag, Value))
 		end
 		return total
 	end
 
-	if tag == BinaryCodec.Enum.string then
+	if tag == TAG_STRING then
 		return 4 + #value
-	elseif tag == BinaryCodec.Enum.JSON then
+	elseif tag == TAG_JSON then
 		const encoded = HttpService:JSONEncode(value)
 		return 4 + #encoded
-	elseif tag == BinaryCodec.Enum.buffer then
+	elseif tag == TAG_BUFFER then
 		return 4 + buffer.len(value)
-	elseif tag == BinaryCodec.Enum.ColorSequence then
+	elseif tag == TAG_COLORSEQUENCE then
 		return 1 + (#value.Keypoints * 16)
-	elseif tag == BinaryCodec.Enum.NumberSequence then
+	elseif tag == TAG_NUMBERSEQUENCE then
 		return 1 + (#value.Keypoints * 12)
 	end
 
 	return 0 --fallback even if it isn't possible to get here (fuck you selene!!!!!)
 end
+BinaryCodec.GetPayloadSize = GetPayloadSize
 
 BinaryCodec.Writers = {
-	[BinaryCodec.Enum.NIL] = function(_Buffer: buffer, Count: number, _Value: boolean): number
+	[TAG_NIL] = function(_Buffer: buffer, Count: number, _Value: boolean): number
 		return Count
 	end,
 
-	[BinaryCodec.Enum.boolean] = function(Buffer: buffer, Count: number, Value: boolean): number
+	[ENUM.boolean] = function(Buffer: buffer, Count: number, Value: boolean): number
 		buffer.writeu8(Buffer, Count, Value and 1 or 0)
 		return Count + 1
 	end,
 
-	[BinaryCodec.Enum.Int8] = function(Buffer: buffer, Count: number, Value: number): number
+	[TAG_INT8] = function(Buffer: buffer, Count: number, Value: number): number
 		buffer.writei8(Buffer, Count, Value)
 		return Count + 1
 	end,
 
-	[BinaryCodec.Enum.Int16] = function(Buffer: buffer, Count: number, Value: number): number
+	[TAG_INT16] = function(Buffer: buffer, Count: number, Value: number): number
 		buffer.writei16(Buffer, Count, Value)
 		return Count + 2
 	end,
 
-	[BinaryCodec.Enum.Int32] = function(Buffer: buffer, Count: number, Value: number): number
+	[TAG_INT32] = function(Buffer: buffer, Count: number, Value: number): number
 		buffer.writei32(Buffer, Count, Value)
 		return Count + 4
 	end,
 
-	[BinaryCodec.Enum.Float32] = function(Buffer: buffer, Count: number, Value: number): number
+	[TAG_FLOAT32] = function(Buffer: buffer, Count: number, Value: number): number
 		buffer.writef32(Buffer, Count, Value)
 		return Count + 4
 	end,
 
-	[BinaryCodec.Enum.Float64] = function(Buffer: buffer, Count: number, Value: number): number
+	[TAG_FLOAT64] = function(Buffer: buffer, Count: number, Value: number): number
 		buffer.writef64(Buffer, Count, Value)
 		return Count + 8
 	end,
 
-	[BinaryCodec.Enum.Vector3] = function(Buffer: buffer, Count: number, Value: Vector3): number
+	[ENUM.Vector3] = function(Buffer: buffer, Count: number, Value: Vector3): number
 		buffer.writef32(Buffer, Count, Value.X)
 		buffer.writef32(Buffer, Count + 4, Value.Y)
 		buffer.writef32(Buffer, Count + 8, Value.Z)
 		return Count + 12
 	end,
 
-	[BinaryCodec.Enum.JSON] = function(Buffer: buffer, Count: number, Value: any): number
+	[TAG_JSON] = function(Buffer: buffer, Count: number, Value: any): number
 		const encoded = HttpService:JSONEncode(Value)
 		const len = #encoded
 		buffer.writeu32(Buffer, Count, len)
@@ -237,21 +252,21 @@ BinaryCodec.Writers = {
 		return Count + 4 + len
 	end,
 
-	[BinaryCodec.Enum.buffer] = function(Buffer: buffer, Count: number, Value: buffer): number
+	[TAG_BUFFER] = function(Buffer: buffer, Count: number, Value: buffer): number
 		const len = buffer.len(Value)
 		buffer.writeu32(Buffer, Count, len)
 		buffer.copy(Buffer, Count + 4, Value, 0, len)
 		return Count + 4 + len
 	end,
 
-	[BinaryCodec.Enum.string] = function(Buffer: buffer, Count: number, Value: string): number
+	[TAG_STRING] = function(Buffer: buffer, Count: number, Value: string): number
 		const len = #Value
 		buffer.writeu32(Buffer, Count, len)
 		buffer.writestring(Buffer, Count + 4, Value)
 		return Count + 4 + len
 	end,
 
-	[BinaryCodec.Enum.CFrame] = function(Buffer: buffer, Count: number, Value: CFrame): number
+	[ENUM.CFrame] = function(Buffer: buffer, Count: number, Value: CFrame): number
 		const pos = Value.Position
 		const axis, angle = Value:ToAxisAngle()
 
@@ -271,20 +286,20 @@ BinaryCodec.Writers = {
 		return Count + 28
 	end,
 
-	[BinaryCodec.Enum.Vector2] = function(Buffer: buffer, Count: number, Value: Vector2): number
+	[ENUM.Vector2] = function(Buffer: buffer, Count: number, Value: Vector2): number
 		buffer.writef32(Buffer, Count, Value.X)
 		buffer.writef32(Buffer, Count + 4, Value.Y)
 		return Count + 8
 	end,
 
-	[BinaryCodec.Enum.Color3] = function(Buffer: buffer, Count: number, Value: Color3): number
+	[ENUM.Color3] = function(Buffer: buffer, Count: number, Value: Color3): number
 		buffer.writef32(Buffer, Count, Value.R)
 		buffer.writef32(Buffer, Count + 4, Value.G)
 		buffer.writef32(Buffer, Count + 8, Value.B)
 		return Count + 12
 	end,
 
-	[BinaryCodec.Enum.UDim2] = function(Buffer: buffer, Count: number, Value: UDim2): number
+	[ENUM.UDim2] = function(Buffer: buffer, Count: number, Value: UDim2): number
 		buffer.writef32(Buffer, Count, Value.X.Scale)
 		buffer.writei32(Buffer, Count + 4, Value.X.Offset)
 		buffer.writef32(Buffer, Count + 8, Value.Y.Scale)
@@ -292,12 +307,12 @@ BinaryCodec.Writers = {
 		return Count + 16
 	end,
 
-	[BinaryCodec.Enum.BrickColor] = function(Buffer: buffer, Count: number, Value: BrickColor): number
+	[ENUM.BrickColor] = function(Buffer: buffer, Count: number, Value: BrickColor): number
 		buffer.writeu16(Buffer, Count, Value.Number)
 		return Count + 2
 	end,
 
-	[BinaryCodec.Enum.Rect] = function(Buffer: buffer, Count: number, Value: Rect): number
+	[ENUM.Rect] = function(Buffer: buffer, Count: number, Value: Rect): number
 		buffer.writef32(Buffer, Count, Value.Min.X)
 		buffer.writef32(Buffer, Count + 4, Value.Min.Y)
 		buffer.writef32(Buffer, Count + 8, Value.Max.X)
@@ -305,24 +320,24 @@ BinaryCodec.Writers = {
 		return Count + 16
 	end,
 
-	[BinaryCodec.Enum.NumberRange] = function(Buffer: buffer, Count: number, Value: NumberRange): number
+	[ENUM.NumberRange] = function(Buffer: buffer, Count: number, Value: NumberRange): number
 		buffer.writef32(Buffer, Count, Value.Min)
 		buffer.writef32(Buffer, Count + 4, Value.Max)
 		return Count + 8
 	end,
 
-	[BinaryCodec.Enum.UDim] = function(Buffer: buffer, Count: number, Value: UDim): number
+	[ENUM.UDim] = function(Buffer: buffer, Count: number, Value: UDim): number
 		buffer.writef32(Buffer, Count, Value.Scale)
 		buffer.writei32(Buffer, Count + 4, Value.Offset)
 		return Count + 8
 	end,
 
-	[BinaryCodec.Enum.DateTime] = function(Buffer: buffer, Count: number, Value: DateTime): number
+	[ENUM.DateTime] = function(Buffer: buffer, Count: number, Value: DateTime): number
 		buffer.writef64(Buffer, Count, Value.UnixTimestamp)
 		return Count + 8
 	end,
 
-	[BinaryCodec.Enum.ColorSequence] = function(Buffer: buffer, Count: number, Value: ColorSequence): number
+	[TAG_COLORSEQUENCE] = function(Buffer: buffer, Count: number, Value: ColorSequence): number
 		const keypoints = Value.Keypoints
 		const count = #keypoints
 		buffer.writeu8(Buffer, Count, count)
@@ -337,7 +352,7 @@ BinaryCodec.Writers = {
 		return Count
 	end,
 
-	[BinaryCodec.Enum.NumberSequence] = function(Buffer: buffer, Count: number, Value: NumberSequence): number
+	[TAG_NUMBERSEQUENCE] = function(Buffer: buffer, Count: number, Value: NumberSequence): number
 		const keypoints = Value.Keypoints
 		const count = #keypoints
 		buffer.writeu8(Buffer, Count, count)
@@ -351,7 +366,7 @@ BinaryCodec.Writers = {
 		return Count
 	end,
 
-	[BinaryCodec.Enum.TweenInfo] = function(Buffer: buffer, Count: number, Value: TweenInfo): number
+	[ENUM.TweenInfo] = function(Buffer: buffer, Count: number, Value: TweenInfo): number
 		buffer.writef32(Buffer, Count, Value.Time)
 		buffer.writeu8(Buffer, Count + 4, Value.EasingStyle.Value)
 		buffer.writeu8(Buffer, Count + 5, Value.EasingDirection.Value)
@@ -362,7 +377,7 @@ BinaryCodec.Writers = {
 		return Count + 16
 	end,
 
-	[BinaryCodec.Enum.Instance] = function(Buffer: buffer, Count: number, Value: Instance, InstanceList: { Instance }): number
+	[ENUM.Instance] = function(Buffer: buffer, Count: number, Value: Instance, InstanceList: { Instance }): number
 		table.insert(InstanceList, Value)
 		const Length = #InstanceList
 
@@ -370,7 +385,7 @@ BinaryCodec.Writers = {
 		return Count + 2
 	end,
 
-	[BinaryCodec.Enum.Map] = function(Buffer: buffer, Count: number, Value: { any }, InstanceList: { Instance }): number
+	[TAG_MAP] = function(Buffer: buffer, Count: number, Value: { any }, InstanceList: { Instance }): number
 		--not using utils here just in case i wanna reuse this for a different game
 		local TableCount = 0
 		for _, _ in Value do
@@ -387,8 +402,8 @@ BinaryCodec.Writers = {
 		const Writers = BinaryCodec.Writers
 
 		for key, val in Value do
-			const KeyTag = BinaryCodec.GetTagFromValue(key)
-			const ValueTag = BinaryCodec.GetTagFromValue(val)
+			const KeyTag = GetTagFromValue(key)
+			const ValueTag = GetTagFromValue(val)
 
 			--write le key
 			buffer.writeu8(Buffer, Count, KeyTag)
@@ -403,60 +418,72 @@ BinaryCodec.Writers = {
 
 		return Count
 	end,
+
+	[ENUM.Vector2int16] = function(Buffer: buffer, Count: number, Value: Vector2int16): number
+		buffer.writei16(Buffer, Count, Value.X)
+		buffer.writei16(Buffer, Count + 2, Value.Y)
+		return Count + 4
+	end,
+	[ENUM.Vector3int16] = function(Buffer: buffer, Count: number, Value: Vector3int16): number
+		buffer.writei16(Buffer, Count, Value.X)
+		buffer.writei16(Buffer, Count + 2, Value.Y)
+		buffer.writei16(Buffer, Count + 4, Value.Z)
+		return Count + 6
+	end,
 } :: { [number]: (Buffer: buffer, Count: number, Value: any, InstanceList: { Instance }) -> number }
 
 BinaryCodec.Readers = {
-	[BinaryCodec.Enum.NIL] = function(_Buffer: buffer, Count: number): (nil, number)
+	[TAG_NIL] = function(_Buffer: buffer, Count: number): (nil, number)
 		return nil, Count
 	end,
 
-	[BinaryCodec.Enum.boolean] = function(Buffer: buffer, Count: number): (boolean, number)
+	[ENUM.boolean] = function(Buffer: buffer, Count: number): (boolean, number)
 		return buffer.readu8(Buffer, Count) == 1, Count + 1
 	end,
 
-	[BinaryCodec.Enum.Int8] = function(Buffer: buffer, Count: number): (number, number)
+	[TAG_INT8] = function(Buffer: buffer, Count: number): (number, number)
 		return buffer.readi8(Buffer, Count), Count + 1
 	end,
 
-	[BinaryCodec.Enum.Int16] = function(Buffer: buffer, Count: number): (number, number)
+	[TAG_INT16] = function(Buffer: buffer, Count: number): (number, number)
 		return buffer.readi16(Buffer, Count), Count + 2
 	end,
 
-	[BinaryCodec.Enum.Int32] = function(Buffer: buffer, Count: number): (number, number)
+	[TAG_INT32] = function(Buffer: buffer, Count: number): (number, number)
 		return buffer.readi32(Buffer, Count), Count + 4
 	end,
 
-	[BinaryCodec.Enum.Float32] = function(Buffer: buffer, Count: number): (number, number)
+	[TAG_FLOAT32] = function(Buffer: buffer, Count: number): (number, number)
 		return buffer.readf32(Buffer, Count), Count + 4
 	end,
 
-	[BinaryCodec.Enum.Float64] = function(Buffer: buffer, Count: number): (number, number)
+	[TAG_FLOAT64] = function(Buffer: buffer, Count: number): (number, number)
 		return buffer.readf64(Buffer, Count), Count + 8
 	end,
 
-	[BinaryCodec.Enum.Vector3] = function(Buffer: buffer, Count: number): (Vector3, number)
+	[ENUM.Vector3] = function(Buffer: buffer, Count: number): (Vector3, number)
 		return Vector3.new(buffer.readf32(Buffer, Count), buffer.readf32(Buffer, Count + 4), buffer.readf32(Buffer, Count + 8)), Count + 12
 	end,
 
-	[BinaryCodec.Enum.JSON] = function(Buffer: buffer, Count: number): any
+	[TAG_JSON] = function(Buffer: buffer, Count: number): (any, number)
 		const len = buffer.readu32(Buffer, Count)
 		const content = buffer.readstring(Buffer, Count + 4, len)
 		return HttpService:JSONDecode(content), Count + 4 + len
 	end,
 
-	[BinaryCodec.Enum.buffer] = function(Buffer: buffer, Count: number): (buffer, number)
+	[TAG_BUFFER] = function(Buffer: buffer, Count: number): (buffer, number)
 		const len = buffer.readu32(Buffer, Count)
 		const newBuf = buffer.create(len)
 		buffer.copy(newBuf, 0, Buffer, Count + 4, len)
 		return newBuf, Count + 4 + len
 	end,
 
-	[BinaryCodec.Enum.string] = function(Buffer: buffer, Count: number): (string, number)
+	[TAG_STRING] = function(Buffer: buffer, Count: number): (string, number)
 		const len = buffer.readu32(Buffer, Count)
 		return buffer.readstring(Buffer, Count + 4, len), Count + 4 + len
 	end,
 
-	[BinaryCodec.Enum.CFrame] = function(Buffer: buffer, Count: number): (CFrame, number)
+	[ENUM.CFrame] = function(Buffer: buffer, Count: number): (CFrame, number)
 		const px, py, pz = buffer.readf32(Buffer, Count), buffer.readf32(Buffer, Count + 4), buffer.readf32(Buffer, Count + 8)
 		const ax, ay, az = buffer.readf32(Buffer, Count + 12), buffer.readf32(Buffer, Count + 16), buffer.readf32(Buffer, Count + 20)
 		const ang = buffer.readf32(Buffer, Count + 24)
@@ -468,39 +495,39 @@ BinaryCodec.Readers = {
 		return CFrame.fromAxisAngle(axis, ang) + pos, Count + 28
 	end,
 
-	[BinaryCodec.Enum.Vector2] = function(Buffer: buffer, Count: number): (Vector2, number)
+	[ENUM.Vector2] = function(Buffer: buffer, Count: number): (Vector2, number)
 		return Vector2.new(buffer.readf32(Buffer, Count), buffer.readf32(Buffer, Count + 4)), Count + 8
 	end,
 
-	[BinaryCodec.Enum.Color3] = function(Buffer: buffer, Count: number): (Color3, number)
+	[ENUM.Color3] = function(Buffer: buffer, Count: number): (Color3, number)
 		return Color3.new(buffer.readf32(Buffer, Count), buffer.readf32(Buffer, Count + 4), buffer.readf32(Buffer, Count + 8)), Count + 12
 	end,
 
-	[BinaryCodec.Enum.UDim2] = function(Buffer: buffer, Count: number): (UDim2, number)
+	[ENUM.UDim2] = function(Buffer: buffer, Count: number): (UDim2, number)
 		return UDim2.new(buffer.readf32(Buffer, Count), buffer.readi32(Buffer, Count + 4), buffer.readf32(Buffer, Count + 8), buffer.readi32(Buffer, Count + 12)), Count + 16
 	end,
 
-	[BinaryCodec.Enum.BrickColor] = function(Buffer: buffer, Count: number): (BrickColor, number)
+	[ENUM.BrickColor] = function(Buffer: buffer, Count: number): (BrickColor, number)
 		return BrickColor.new(buffer.readu16(Buffer, Count)), Count + 2
 	end,
 
-	[BinaryCodec.Enum.Rect] = function(Buffer: buffer, Count: number): (Rect, number)
+	[ENUM.Rect] = function(Buffer: buffer, Count: number): (Rect, number)
 		return Rect.new(buffer.readf32(Buffer, Count), buffer.readf32(Buffer, Count + 4), buffer.readf32(Buffer, Count + 8), buffer.readf32(Buffer, Count + 12)), Count + 16
 	end,
 
-	[BinaryCodec.Enum.NumberRange] = function(Buffer: buffer, Count: number): (NumberRange, number)
+	[ENUM.NumberRange] = function(Buffer: buffer, Count: number): (NumberRange, number)
 		return NumberRange.new(buffer.readf32(Buffer, Count), buffer.readf32(Buffer, Count + 4)), Count + 8
 	end,
 
-	[BinaryCodec.Enum.UDim] = function(Buffer: buffer, Count: number): (UDim, number)
+	[ENUM.UDim] = function(Buffer: buffer, Count: number): (UDim, number)
 		return UDim.new(buffer.readf32(Buffer, Count), buffer.readi32(Buffer, Count + 4)), Count + 8
 	end,
 
-	[BinaryCodec.Enum.DateTime] = function(Buffer: buffer, Count: number): (DateTime, number)
+	[ENUM.DateTime] = function(Buffer: buffer, Count: number): (DateTime, number)
 		return DateTime.fromUnixTimestamp(buffer.readf64(Buffer, Count)), Count + 8
 	end,
 
-	[BinaryCodec.Enum.ColorSequence] = function(Buffer: buffer, Count: number): (ColorSequence, number)
+	[TAG_COLORSEQUENCE] = function(Buffer: buffer, Count: number): (ColorSequence, number)
 		const count = buffer.readu8(Buffer, Count)
 		Count += 1
 		const keypoints = {}
@@ -513,7 +540,7 @@ BinaryCodec.Readers = {
 		return ColorSequence.new(keypoints), Count
 	end,
 
-	[BinaryCodec.Enum.NumberSequence] = function(Buffer: buffer, Count: number): (NumberSequence, number)
+	[TAG_NUMBERSEQUENCE] = function(Buffer: buffer, Count: number): (NumberSequence, number)
 		const count = buffer.readu8(Buffer, Count)
 		Count += 1
 		const keypoints = {}
@@ -527,7 +554,7 @@ BinaryCodec.Readers = {
 		return NumberSequence.new(keypoints), Count
 	end,
 
-	[BinaryCodec.Enum.TweenInfo] = function(Buffer: buffer, Count: number): (TweenInfo, number)
+	[ENUM.TweenInfo] = function(Buffer: buffer, Count: number): (TweenInfo, number)
 		const Time = buffer.readf32(Buffer, Count)
 		const StyleId = buffer.readu8(Buffer, Count + 4)
 		const DirectionId = buffer.readu8(Buffer, Count + 5)
@@ -541,13 +568,13 @@ BinaryCodec.Readers = {
 		return TweenInfo.new(Time, style, dir, count, reverses, Delay), Count + 16
 	end,
 
-	[BinaryCodec.Enum.Instance] = function(Buffer: buffer, Count: number, InstanceList: { Instance }): (Instance?, number)
+	[ENUM.Instance] = function(Buffer: buffer, Count: number, InstanceList: { Instance }): (Instance?, number)
 		const index = buffer.readu16(Buffer, Count)
 		const inst = InstanceList and InstanceList[index] or nil
 		return inst, Count + 2
 	end,
 
-	[BinaryCodec.Enum.Map] = function(Buffer: buffer, Count: number, InstanceList: { Instance }): ({ any }, number)
+	[TAG_MAP] = function(Buffer: buffer, Count: number, InstanceList: { Instance }): ({ any }, number)
 		const count = buffer.readu16(Buffer, Count)
 		Count += 2
 
@@ -572,6 +599,14 @@ BinaryCodec.Readers = {
 		end
 
 		return Table, Count
+	end,
+
+	[ENUM.Vector2int16] = function(Buffer: buffer, Count: number): (Vector2int16, number)
+		return Vector2int16.new(buffer.readi16(Buffer, Count), buffer.readi16(Buffer, Count + 2)), Count + 4
+	end,
+
+	[ENUM.Vector3int16] = function(Buffer: buffer, Count: number): (Vector3int16, number)
+		return Vector3int16.new(buffer.readi16(Buffer, Count), buffer.readi16(Buffer, Count + 2), buffer.readi16(Buffer, Count + 4)), Count + 6
 	end,
 } :: { (Buffer: buffer, Count: number, InstanceList: { Instance }) -> (any, number) }
 
