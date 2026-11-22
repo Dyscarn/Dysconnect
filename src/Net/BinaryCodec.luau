@@ -37,6 +37,7 @@ const TAG_MAP = 25
 const TAG_VECTOR2INT16 = 26
 const TAG_VECTOR3INT16 = 27
 const TAG_LONGSTRING = 28
+const TAG_ARRAY = 29
 
 const BinaryCodec = {
 	Enum = {
@@ -69,6 +70,7 @@ const BinaryCodec = {
 		Vector2int16 = TAG_VECTOR2INT16,
 		Vector3int16 = TAG_VECTOR3INT16,
 		LongString = TAG_LONGSTRING,
+		Array = TAG_ARRAY,
 	} :: { [string]: number },
 }
 
@@ -121,6 +123,23 @@ const function DeepFreezeTable<T>(Target: T & {}): T & {} --if all tables are fr
 	return table.freeze(Target)
 end
 
+const function IsArray(Value: { any }): boolean
+	const len = #Value
+	if len == 0 then
+		return false
+	end
+
+	local count = 0
+	for key, _ in Value do
+		if typeof(key) ~= "number" or key < 1 or key > len or key % 1 ~= 0 then
+			return false
+		end
+		count += 1
+	end
+
+	return count == len
+end
+
 const function IsNumberAnInt(Value: number): boolean
 	return Value % 1 == 0 --if the remainder of the number divided by 1 is 0 then there's no decimal remainder for the number therefore it's an int
 end
@@ -165,7 +184,7 @@ const function GetTagFromValue(Value: any): number
 	end
 
 	if Type == "table" then
-		return TAG_MAP
+		return IsArray(Value) and TAG_ARRAY or TAG_MAP
 	end
 
 	if Type == "string" then
@@ -218,6 +237,13 @@ const function GetPayloadSize(tag: number, value: any): number
 		return 1 + (#value.Keypoints * 16)
 	elseif tag == TAG_NUMBERSEQUENCE then
 		return 1 + (#value.Keypoints * 12)
+	elseif tag == TAG_ARRAY then
+		local total = 2
+		for _, Item in value do
+			const ItemTag = GetTagFromValue(Item)
+			total += 1 + GetPayloadSize(ItemTag, Item)
+		end
+		return total
 	end
 
 	return 0 --fallback even if it isn't possible to get here (fuck you selene!!!!!)
@@ -476,11 +502,36 @@ WRITERS = {
 		buffer.writei16(Buffer, Count + 2, Value.Y)
 		return Count + 4
 	end,
+
 	[TAG_VECTOR3INT16] = function(Buffer: buffer, Count: number, Value: Vector3int16): number
 		buffer.writei16(Buffer, Count, Value.X)
 		buffer.writei16(Buffer, Count + 2, Value.Y)
 		buffer.writei16(Buffer, Count + 4, Value.Z)
 		return Count + 6
+	end,
+
+	[TAG_ARRAY] = function(Buffer: buffer, Count: number, Value: { any }, InstanceList: { Instance }): number
+		const len = #Value
+		if len > 65535 then
+			error(`[Dysconnect] Can't send a table with {len} entries! Aborting buffering... (max is 65535)`)
+		end
+
+		buffer.writeu16(Buffer, Count, len)
+		Count += 2
+
+		for Index = 1, len do
+			const Item = Value[Index]
+			const ItemTag = GetTagFromValue(Item)
+			buffer.writeu8(Buffer, Count, ItemTag)
+			Count += 1
+			const Writer = GetWriter(ItemTag)
+			if not Writer then
+				continue
+			end
+			Writer(Buffer, Count, Item, InstanceList)
+		end
+
+		return Count
 	end,
 }
 
@@ -690,6 +741,26 @@ READERS = {
 
 	[TAG_VECTOR3INT16] = function(Buffer: buffer, Count: number): (Vector3int16, number)
 		return Vector3int16.new(buffer.readi16(Buffer, Count), buffer.readi16(Buffer, Count + 2), buffer.readi16(Buffer, Count + 4)), Count + 6
+	end,
+
+	[TAG_ARRAY] = function(Buffer: buffer, Count: number, InstanceList: { Instance }): ({ any }, number)
+		const len = buffer.readu16(Buffer, Count)
+		Count += 2
+
+		const Result = table.create(len)
+		for Index = 1, len do
+			const ItemTag = buffer.readu8(Buffer, Count)
+			Count += 1
+			const Reader = GetReader(ItemTag)
+			if not Reader then
+				continue
+			end
+			local Item
+			Item, Count = Reader(Buffer, Count, InstanceList)
+			Result[Index] = Item
+		end
+
+		return Result, Count
 	end,
 }
 
