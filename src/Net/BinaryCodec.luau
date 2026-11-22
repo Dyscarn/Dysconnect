@@ -9,22 +9,37 @@ const HttpService = game:GetService("HttpService")
 
 --common tags on their own var
 const TAG_NIL = 0
+const TAG_BOOLEAN = 1
 const TAG_INT8 = 2
 const TAG_INT16 = 3
 const TAG_INT32 = 4
 const TAG_FLOAT32 = 5
 const TAG_FLOAT64 = 6
+const TAG_VECTOR3 = 7
 const TAG_JSON = 8
 const TAG_BUFFER = 9
 const TAG_STRING = 10
+const TAG_CFRAME = 11
+const TAG_VECTOR2 = 12
+const TAG_COLOR3 = 13
+const TAG_UDIM2 = 14
+const TAG_BRICKCOLOR = 15
+const TAG_RECT = 16
+const TAG_NUMBERRANGE = 17
+const TAG_UDIM = 18
+const TAG_DATETIME = 19
 const TAG_COLORSEQUENCE = 20
 const TAG_NUMBERSEQUENCE = 21
+const TAG_TWEENINFO = 22
+const TAG_INSTANCE = 23
 const TAG_MAP = 24
+const TAG_VECTOR2INT16 = 25
+const TAG_VECTOR3INT16 = 26
 
 const BinaryCodec = {
 	Enum = {
 		NIL = TAG_NIL,
-		boolean = 1,
+		boolean = TAG_BOOLEAN,
 		Int8 = TAG_INT8,
 		Int16 = TAG_INT16,
 		Int32 = TAG_INT32,
@@ -58,26 +73,26 @@ const ENUM = BinaryCodec.Enum
 --setting the size of every type beforehand to not have to calculate it unless it's necessary
 const FIXED_SIZES = table.freeze({
 	[TAG_NIL] = 0,
-	[ENUM.boolean] = 1,
+	[TAG_BOOLEAN] = 1,
 	[TAG_INT8] = 1,
 	[TAG_INT16] = 2,
 	[TAG_INT32] = 4,
 	[TAG_FLOAT32] = 4,
 	[TAG_FLOAT64] = 8,
-	[ENUM.Vector3] = 12,
-	[ENUM.CFrame] = 28,
-	[ENUM.Vector2] = 8,
-	[ENUM.Color3] = 12,
-	[ENUM.UDim2] = 16,
-	[ENUM.BrickColor] = 2,
-	[ENUM.Rect] = 16,
-	[ENUM.NumberRange] = 8,
-	[ENUM.UDim] = 8,
-	[ENUM.DateTime] = 8,
-	[ENUM.TweenInfo] = 16,
-	[ENUM.Instance] = 2,
-	[ENUM.Vector2int16] = 4,
-	[ENUM.Vector3int16] = 6,
+	[TAG_VECTOR3] = 12,
+	[TAG_CFRAME] = 28,
+	[TAG_VECTOR2] = 8,
+	[TAG_COLOR3] = 12,
+	[TAG_UDIM2] = 16,
+	[TAG_BRICKCOLOR] = 2,
+	[TAG_RECT] = 16,
+	[TAG_NUMBERRANGE] = 8,
+	[TAG_UDIM] = 8,
+	[TAG_DATETIME] = 4,
+	[TAG_TWEENINFO] = 15,
+	[TAG_INSTANCE] = 2,
+	[TAG_VECTOR2INT16] = 4,
+	[TAG_VECTOR3INT16] = 6,
 }) :: { number }
 
 --tweeninfo stuffs
@@ -109,14 +124,6 @@ const function IsNumberBetweenBounds(Value: number, Minimum: number, Maximum: nu
 	return Value >= Minimum and Value <= Maximum
 end
 
-const function IsHighPrecisionFloat(value: number): boolean
-	--making a dummy buffer to test if the value remains equal is a lot
-	--more precise than any other calculations i could come up with
-	const dummy = buffer.create(4)
-	buffer.writef32(dummy, 0, value)
-	return buffer.readf32(dummy, 0) ~= value
-end
-
 const function GetTagFromValue(Value: any): number
 	if Value == nil then
 		return TAG_NIL
@@ -126,11 +133,7 @@ const function GetTagFromValue(Value: any): number
 
 	if Type == "number" then
 		if not IsNumberAnInt(Value) then
-			if IsHighPrecisionFloat(Value) then
-				return TAG_FLOAT64
-			end
-
-			return TAG_FLOAT32
+			return if math.abs(Value) > 16_777_216 then TAG_FLOAT64 else TAG_FLOAT32 -- 2^24
 		end
 
 		if IsNumberBetweenBounds(Value, -128, 127) then -- signed:  -(2^8) / 2 ; (2^8) / 2 - 1
@@ -145,12 +148,7 @@ const function GetTagFromValue(Value: any): number
 			return TAG_INT32
 		end
 
-		--f64
-		if IsHighPrecisionFloat(Value) then
-			return TAG_FLOAT64
-		end
-
-		return TAG_FLOAT32
+		return if math.abs(Value) > 16_777_216 then TAG_FLOAT64 else TAG_FLOAT32 -- 2^24
 	end
 
 	if Type == "table" then
@@ -161,6 +159,7 @@ const function GetTagFromValue(Value: any): number
 		return ENUM[Type]
 	end
 
+	warn(`[Dysconnect] Item "{Value}" of type {Type} isn't supported by Dysconnect! Falling back to JSON...`)
 	return TAG_JSON
 end
 BinaryCodec.GetTagFromValue = GetTagFromValue
@@ -203,11 +202,11 @@ end
 BinaryCodec.GetPayloadSize = GetPayloadSize
 
 BinaryCodec.Writers = {
-	[TAG_NIL] = function(_Buffer: buffer, Count: number, _Value: boolean): number
+	[TAG_NIL] = function(_Buffer: buffer, Count: number): number
 		return Count
 	end,
 
-	[ENUM.boolean] = function(Buffer: buffer, Count: number, Value: boolean): number
+	[TAG_BOOLEAN] = function(Buffer: buffer, Count: number, Value: boolean): number
 		buffer.writeu8(Buffer, Count, Value and 1 or 0)
 		return Count + 1
 	end,
@@ -237,7 +236,7 @@ BinaryCodec.Writers = {
 		return Count + 8
 	end,
 
-	[ENUM.Vector3] = function(Buffer: buffer, Count: number, Value: Vector3): number
+	[TAG_VECTOR3] = function(Buffer: buffer, Count: number, Value: Vector3): number
 		buffer.writef32(Buffer, Count, Value.X)
 		buffer.writef32(Buffer, Count + 4, Value.Y)
 		buffer.writef32(Buffer, Count + 8, Value.Z)
@@ -266,7 +265,7 @@ BinaryCodec.Writers = {
 		return Count + 4 + len
 	end,
 
-	[ENUM.CFrame] = function(Buffer: buffer, Count: number, Value: CFrame): number
+	[TAG_CFRAME] = function(Buffer: buffer, Count: number, Value: CFrame): number
 		const pos = Value.Position
 		const axis, angle = Value:ToAxisAngle()
 
@@ -286,20 +285,20 @@ BinaryCodec.Writers = {
 		return Count + 28
 	end,
 
-	[ENUM.Vector2] = function(Buffer: buffer, Count: number, Value: Vector2): number
+	[TAG_VECTOR2] = function(Buffer: buffer, Count: number, Value: Vector2): number
 		buffer.writef32(Buffer, Count, Value.X)
 		buffer.writef32(Buffer, Count + 4, Value.Y)
 		return Count + 8
 	end,
 
-	[ENUM.Color3] = function(Buffer: buffer, Count: number, Value: Color3): number
+	[TAG_COLOR3] = function(Buffer: buffer, Count: number, Value: Color3): number
 		buffer.writef32(Buffer, Count, Value.R)
 		buffer.writef32(Buffer, Count + 4, Value.G)
 		buffer.writef32(Buffer, Count + 8, Value.B)
 		return Count + 12
 	end,
 
-	[ENUM.UDim2] = function(Buffer: buffer, Count: number, Value: UDim2): number
+	[TAG_UDIM2] = function(Buffer: buffer, Count: number, Value: UDim2): number
 		buffer.writef32(Buffer, Count, Value.X.Scale)
 		buffer.writei32(Buffer, Count + 4, Value.X.Offset)
 		buffer.writef32(Buffer, Count + 8, Value.Y.Scale)
@@ -307,12 +306,12 @@ BinaryCodec.Writers = {
 		return Count + 16
 	end,
 
-	[ENUM.BrickColor] = function(Buffer: buffer, Count: number, Value: BrickColor): number
+	[TAG_BRICKCOLOR] = function(Buffer: buffer, Count: number, Value: BrickColor): number
 		buffer.writeu16(Buffer, Count, Value.Number)
 		return Count + 2
 	end,
 
-	[ENUM.Rect] = function(Buffer: buffer, Count: number, Value: Rect): number
+	[TAG_RECT] = function(Buffer: buffer, Count: number, Value: Rect): number
 		buffer.writef32(Buffer, Count, Value.Min.X)
 		buffer.writef32(Buffer, Count + 4, Value.Min.Y)
 		buffer.writef32(Buffer, Count + 8, Value.Max.X)
@@ -320,21 +319,21 @@ BinaryCodec.Writers = {
 		return Count + 16
 	end,
 
-	[ENUM.NumberRange] = function(Buffer: buffer, Count: number, Value: NumberRange): number
+	[TAG_NUMBERRANGE] = function(Buffer: buffer, Count: number, Value: NumberRange): number
 		buffer.writef32(Buffer, Count, Value.Min)
 		buffer.writef32(Buffer, Count + 4, Value.Max)
 		return Count + 8
 	end,
 
-	[ENUM.UDim] = function(Buffer: buffer, Count: number, Value: UDim): number
+	[TAG_UDIM] = function(Buffer: buffer, Count: number, Value: UDim): number
 		buffer.writef32(Buffer, Count, Value.Scale)
 		buffer.writei32(Buffer, Count + 4, Value.Offset)
 		return Count + 8
 	end,
 
-	[ENUM.DateTime] = function(Buffer: buffer, Count: number, Value: DateTime): number
-		buffer.writef64(Buffer, Count, Value.UnixTimestamp)
-		return Count + 8
+	[TAG_DATETIME] = function(Buffer: buffer, Count: number, Value: DateTime): number
+		buffer.writeu32(Buffer, Count, Value.UnixTimestamp)
+		return Count + 4
 	end,
 
 	[TAG_COLORSEQUENCE] = function(Buffer: buffer, Count: number, Value: ColorSequence): number
@@ -366,7 +365,7 @@ BinaryCodec.Writers = {
 		return Count
 	end,
 
-	[ENUM.TweenInfo] = function(Buffer: buffer, Count: number, Value: TweenInfo): number
+	[TAG_TWEENINFO] = function(Buffer: buffer, Count: number, Value: TweenInfo): number
 		buffer.writef32(Buffer, Count, Value.Time)
 		buffer.writeu8(Buffer, Count + 4, Value.EasingStyle.Value)
 		buffer.writeu8(Buffer, Count + 5, Value.EasingDirection.Value)
@@ -374,10 +373,10 @@ BinaryCodec.Writers = {
 		buffer.writeu8(Buffer, Count + 10, Value.Reverses and 1 or 0)
 		buffer.writef32(Buffer, Count + 11, Value.DelayTime)
 
-		return Count + 16
+		return Count + 15
 	end,
 
-	[ENUM.Instance] = function(Buffer: buffer, Count: number, Value: Instance, InstanceList: { Instance }): number
+	[TAG_INSTANCE] = function(Buffer: buffer, Count: number, Value: Instance, InstanceList: { Instance }): number
 		table.insert(InstanceList, Value)
 		const Length = #InstanceList
 
@@ -419,12 +418,12 @@ BinaryCodec.Writers = {
 		return Count
 	end,
 
-	[ENUM.Vector2int16] = function(Buffer: buffer, Count: number, Value: Vector2int16): number
+	[TAG_VECTOR2INT16] = function(Buffer: buffer, Count: number, Value: Vector2int16): number
 		buffer.writei16(Buffer, Count, Value.X)
 		buffer.writei16(Buffer, Count + 2, Value.Y)
 		return Count + 4
 	end,
-	[ENUM.Vector3int16] = function(Buffer: buffer, Count: number, Value: Vector3int16): number
+	[TAG_VECTOR3INT16] = function(Buffer: buffer, Count: number, Value: Vector3int16): number
 		buffer.writei16(Buffer, Count, Value.X)
 		buffer.writei16(Buffer, Count + 2, Value.Y)
 		buffer.writei16(Buffer, Count + 4, Value.Z)
@@ -437,7 +436,7 @@ BinaryCodec.Readers = {
 		return nil, Count
 	end,
 
-	[ENUM.boolean] = function(Buffer: buffer, Count: number): (boolean, number)
+	[TAG_BOOLEAN] = function(Buffer: buffer, Count: number): (boolean, number)
 		return buffer.readu8(Buffer, Count) == 1, Count + 1
 	end,
 
@@ -461,7 +460,7 @@ BinaryCodec.Readers = {
 		return buffer.readf64(Buffer, Count), Count + 8
 	end,
 
-	[ENUM.Vector3] = function(Buffer: buffer, Count: number): (Vector3, number)
+	[TAG_VECTOR3] = function(Buffer: buffer, Count: number): (Vector3, number)
 		return Vector3.new(buffer.readf32(Buffer, Count), buffer.readf32(Buffer, Count + 4), buffer.readf32(Buffer, Count + 8)), Count + 12
 	end,
 
@@ -483,7 +482,7 @@ BinaryCodec.Readers = {
 		return buffer.readstring(Buffer, Count + 4, len), Count + 4 + len
 	end,
 
-	[ENUM.CFrame] = function(Buffer: buffer, Count: number): (CFrame, number)
+	[TAG_CFRAME] = function(Buffer: buffer, Count: number): (CFrame, number)
 		const px, py, pz = buffer.readf32(Buffer, Count), buffer.readf32(Buffer, Count + 4), buffer.readf32(Buffer, Count + 8)
 		const ax, ay, az = buffer.readf32(Buffer, Count + 12), buffer.readf32(Buffer, Count + 16), buffer.readf32(Buffer, Count + 20)
 		const ang = buffer.readf32(Buffer, Count + 24)
@@ -495,36 +494,36 @@ BinaryCodec.Readers = {
 		return CFrame.fromAxisAngle(axis, ang) + pos, Count + 28
 	end,
 
-	[ENUM.Vector2] = function(Buffer: buffer, Count: number): (Vector2, number)
+	[TAG_VECTOR2] = function(Buffer: buffer, Count: number): (Vector2, number)
 		return Vector2.new(buffer.readf32(Buffer, Count), buffer.readf32(Buffer, Count + 4)), Count + 8
 	end,
 
-	[ENUM.Color3] = function(Buffer: buffer, Count: number): (Color3, number)
+	[TAG_COLOR3] = function(Buffer: buffer, Count: number): (Color3, number)
 		return Color3.new(buffer.readf32(Buffer, Count), buffer.readf32(Buffer, Count + 4), buffer.readf32(Buffer, Count + 8)), Count + 12
 	end,
 
-	[ENUM.UDim2] = function(Buffer: buffer, Count: number): (UDim2, number)
+	[TAG_UDIM2] = function(Buffer: buffer, Count: number): (UDim2, number)
 		return UDim2.new(buffer.readf32(Buffer, Count), buffer.readi32(Buffer, Count + 4), buffer.readf32(Buffer, Count + 8), buffer.readi32(Buffer, Count + 12)), Count + 16
 	end,
 
-	[ENUM.BrickColor] = function(Buffer: buffer, Count: number): (BrickColor, number)
+	[TAG_BRICKCOLOR] = function(Buffer: buffer, Count: number): (BrickColor, number)
 		return BrickColor.new(buffer.readu16(Buffer, Count)), Count + 2
 	end,
 
-	[ENUM.Rect] = function(Buffer: buffer, Count: number): (Rect, number)
+	[TAG_RECT] = function(Buffer: buffer, Count: number): (Rect, number)
 		return Rect.new(buffer.readf32(Buffer, Count), buffer.readf32(Buffer, Count + 4), buffer.readf32(Buffer, Count + 8), buffer.readf32(Buffer, Count + 12)), Count + 16
 	end,
 
-	[ENUM.NumberRange] = function(Buffer: buffer, Count: number): (NumberRange, number)
+	[TAG_NUMBERRANGE] = function(Buffer: buffer, Count: number): (NumberRange, number)
 		return NumberRange.new(buffer.readf32(Buffer, Count), buffer.readf32(Buffer, Count + 4)), Count + 8
 	end,
 
-	[ENUM.UDim] = function(Buffer: buffer, Count: number): (UDim, number)
+	[TAG_UDIM] = function(Buffer: buffer, Count: number): (UDim, number)
 		return UDim.new(buffer.readf32(Buffer, Count), buffer.readi32(Buffer, Count + 4)), Count + 8
 	end,
 
-	[ENUM.DateTime] = function(Buffer: buffer, Count: number): (DateTime, number)
-		return DateTime.fromUnixTimestamp(buffer.readf64(Buffer, Count)), Count + 8
+	[TAG_DATETIME] = function(Buffer: buffer, Count: number): (DateTime, number)
+		return DateTime.fromUnixTimestamp(buffer.readu32(Buffer, Count)), Count + 4
 	end,
 
 	[TAG_COLORSEQUENCE] = function(Buffer: buffer, Count: number): (ColorSequence, number)
@@ -554,7 +553,7 @@ BinaryCodec.Readers = {
 		return NumberSequence.new(keypoints), Count
 	end,
 
-	[ENUM.TweenInfo] = function(Buffer: buffer, Count: number): (TweenInfo, number)
+	[TAG_TWEENINFO] = function(Buffer: buffer, Count: number): (TweenInfo, number)
 		const Time = buffer.readf32(Buffer, Count)
 		const StyleId = buffer.readu8(Buffer, Count + 4)
 		const DirectionId = buffer.readu8(Buffer, Count + 5)
@@ -565,10 +564,10 @@ BinaryCodec.Readers = {
 		const style = StyleMap[StyleId] or Enum.EasingStyle.Linear
 		const dir = DirectionMap[DirectionId] or Enum.EasingDirection.Out
 
-		return TweenInfo.new(Time, style, dir, count, reverses, Delay), Count + 16
+		return TweenInfo.new(Time, style, dir, count, reverses, Delay), Count + 15
 	end,
 
-	[ENUM.Instance] = function(Buffer: buffer, Count: number, InstanceList: { Instance }): (Instance?, number)
+	[TAG_INSTANCE] = function(Buffer: buffer, Count: number, InstanceList: { Instance }): (Instance?, number)
 		const index = buffer.readu16(Buffer, Count)
 		const inst = InstanceList and InstanceList[index] or nil
 		return inst, Count + 2
@@ -601,11 +600,11 @@ BinaryCodec.Readers = {
 		return Table, Count
 	end,
 
-	[ENUM.Vector2int16] = function(Buffer: buffer, Count: number): (Vector2int16, number)
+	[TAG_VECTOR2INT16] = function(Buffer: buffer, Count: number): (Vector2int16, number)
 		return Vector2int16.new(buffer.readi16(Buffer, Count), buffer.readi16(Buffer, Count + 2)), Count + 4
 	end,
 
-	[ENUM.Vector3int16] = function(Buffer: buffer, Count: number): (Vector3int16, number)
+	[TAG_VECTOR3INT16] = function(Buffer: buffer, Count: number): (Vector3int16, number)
 		return Vector3int16.new(buffer.readi16(Buffer, Count), buffer.readi16(Buffer, Count + 2), buffer.readi16(Buffer, Count + 4)), Count + 6
 	end,
 } :: { (Buffer: buffer, Count: number, InstanceList: { Instance }) -> (any, number) }
