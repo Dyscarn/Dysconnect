@@ -79,7 +79,10 @@ const function PackArgumentsForNetwork(Name: string, Arguments: Types.Args): { a
 		const Offset = 3
 
 		buffer.writeu8(PacketBuffer, Offset, PreparedArgs[1].Tag)
-		BinaryCodec.Writers[PreparedArgs[1].Tag](PacketBuffer, Offset + 1, PreparedArgs[1].Value, InstanceList)
+		const Writer = BinaryCodec.GetWriter(PreparedArgs[1].Tag)
+		if Writer then
+			Writer(PacketBuffer, Offset + 1, PreparedArgs[1].Value, InstanceList)
+		end
 	else
 		buffer.writeu16(PacketBuffer, 0, NameId)
 		buffer.writeu8(PacketBuffer, 2, Arguments.n)
@@ -88,8 +91,12 @@ const function PackArgumentsForNetwork(Name: string, Arguments: Types.Args): { a
 		for _, Item in PreparedArgs do
 			--write le tag first
 			buffer.writeu8(PacketBuffer, Offset, Item.Tag)
+			const Writer = BinaryCodec.GetWriter(Item.Tag)
+			if not Writer then
+				continue
+			end
 			--write it and increment the offset based on it
-			Offset = BinaryCodec.Writers[Item.Tag](PacketBuffer, Offset + 1, Item.Value, InstanceList)
+			Offset = Writer(PacketBuffer, Offset + 1, Item.Value, InstanceList)
 		end
 	end
 
@@ -126,8 +133,11 @@ const function UnpackArgumentsFromNetwork(Arguments: { any }): (string, { [any]:
 
 		Offset = 3
 		const Tag = buffer.readu8(PacketBuffer, Offset)
-		const Value = BinaryCodec.Readers[Tag](PacketBuffer, Offset + 1, InstanceList)
-		Unpacked[1] = Value
+		const Reader = BinaryCodec.GetReader(Tag)
+		if Reader then
+			const Value = Reader(PacketBuffer, Offset + 1, InstanceList)
+			Unpacked[1] = Value
+		end
 	else
 		Unpacked = table.create(ArgCount) :: Types.Args
 		Unpacked.n = ArgCount
@@ -139,8 +149,13 @@ const function UnpackArgumentsFromNetwork(Arguments: { any }): (string, { [any]:
 			const Tag = buffer.readu8(PacketBuffer, Offset)
 			Offset += 1
 
+			const Reader = BinaryCodec.GetReader(Tag)
+			if not Reader then
+				break --can't move on to next since if it just continues it'll break
+			end
+
 			--get correspondent value
-			const Value, NewCursor = BinaryCodec.Readers[Tag](PacketBuffer, Offset, InstanceList)
+			const Value, NewCursor = Reader(PacketBuffer, Offset, InstanceList)
 
 			--put it in the param table
 			Unpacked[i] = Value
@@ -229,7 +244,11 @@ const function PackBatchEnvelope(Entries: { Types.BatchPacket }): (buffer, { Ins
 		for _, Arg in Payload.Args do
 			buffer.writeu8(Buffer, Offset, Arg.Tag)
 			Offset += 1
-			Offset = BinaryCodec.Writers[Arg.Tag](Buffer, Offset, Arg.Value, InstanceList)
+			const Writer = BinaryCodec.GetWriter(Arg.Tag)
+			if not Writer then
+				continue
+			end
+			Offset = Writer(Buffer, Offset, Arg.Value, InstanceList)
 		end
 	end
 
@@ -262,7 +281,11 @@ const function UnpackBatchEnvelope(Buffer: buffer, InstanceList: { Instance }): 
 		for i = 1, ArgCount do
 			const Tag = buffer.readu8(Buffer, Offset)
 			Offset += 1
-			const Value, NewOffset = BinaryCodec.Readers[Tag](Buffer, Offset, InstanceList)
+			const Reader = BinaryCodec.GetReader(Tag)
+			if not Reader then
+				break --can't move on to next since if it just continues it'll break
+			end
+			const Value, NewOffset = Reader(Buffer, Offset, InstanceList)
 			Args[i] = Value
 			Offset = NewOffset
 		end

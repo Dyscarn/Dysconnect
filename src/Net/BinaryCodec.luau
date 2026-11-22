@@ -224,7 +224,19 @@ const function GetPayloadSize(tag: number, value: any): number
 end
 BinaryCodec.GetPayloadSize = GetPayloadSize
 
-BinaryCodec.Writers = {
+local WRITERS: { [number]: (Buffer: buffer, Count: number, Value: any, InstanceList: { Instance }) -> number }
+
+const function GetWriter(Tag: number): ((Buffer: buffer, Count: number, Value: any, InstanceList: { Instance }) -> number)?
+	const Writer = WRITERS[Tag]
+	if not Writer then
+		error(`[Dysconnect] Writer not found for tag [Tag]!`)
+		return nil
+	end
+	return Writer
+end
+BinaryCodec.GetWriter = GetWriter
+
+WRITERS = {
 	[TAG_NIL] = function(_Buffer: buffer, Count: number): number
 		return Count
 	end,
@@ -431,8 +443,6 @@ BinaryCodec.Writers = {
 		buffer.writeu16(Buffer, Count, TableCount) --write le count
 		Count += 2
 
-		const Writers = BinaryCodec.Writers
-
 		for key, val in Value do
 			const KeyTag = GetTagFromValue(key)
 			const ValueTag = GetTagFromValue(val)
@@ -440,12 +450,22 @@ BinaryCodec.Writers = {
 			--write le key
 			buffer.writeu8(Buffer, Count, KeyTag)
 			Count += 1
-			Count = Writers[KeyTag](Buffer, Count, key, InstanceList)
+			const KeyWriter = GetWriter(KeyTag)
+			if not KeyWriter then
+				Count += 1 --skip the value
+				continue
+			end
+			Count = KeyWriter(Buffer, Count, key, InstanceList)
 
 			--write le value after le key
 			buffer.writeu8(Buffer, Count, ValueTag)
 			Count += 1
-			Count = Writers[ValueTag](Buffer, Count, val, InstanceList)
+			const ValueWriter = GetWriter(ValueTag)
+			if not ValueWriter then
+				Count += 1 --skip the value
+				continue
+			end
+			Count = ValueWriter(Buffer, Count, val, InstanceList)
 		end
 
 		return Count
@@ -462,9 +482,21 @@ BinaryCodec.Writers = {
 		buffer.writei16(Buffer, Count + 4, Value.Z)
 		return Count + 6
 	end,
-} :: { [number]: (Buffer: buffer, Count: number, Value: any, InstanceList: { Instance }) -> number }
+}
 
-BinaryCodec.Readers = {
+local READERS: { (Buffer: buffer, Count: number, InstanceList: { Instance }) -> (any, number) }
+
+const function GetReader(Tag: number): ((Buffer: buffer, Count: number, InstanceList: { Instance }) -> (any, number))?
+	const Reader = READERS[Tag]
+	if not Reader then
+		error(`[Dysconnect] Reader not found for tag [Tag]!`)
+		return nil
+	end
+	return Reader
+end
+BinaryCodec.GetReader = GetReader
+
+READERS = {
 	[TAG_NIL] = function(_Buffer: buffer, Count: number): (nil, number)
 		return nil, Count
 	end,
@@ -473,8 +505,8 @@ BinaryCodec.Readers = {
 		return false, Count
 	end,
 
-	[TAG_TRUE] = function(_Buffer: buffer, Count: number): (false, number)
-		return false, Count
+	[TAG_TRUE] = function(_Buffer: buffer, Count: number): (true, number)
+		return true, Count
 	end,
 
 	[TAG_INT8] = function(Buffer: buffer, Count: number): (number, number)
@@ -524,7 +556,7 @@ BinaryCodec.Readers = {
 
 	[TAG_LONGSTRING] = function(Buffer: buffer, Count: number): (string, number)
 		const len = buffer.readu16(Buffer, Count)
-		return buffer.readstring(Buffer, Count + 1, len), Count + 1 + len
+		return buffer.readstring(Buffer, Count + 2, len), Count + 2 + len
 	end,
 
 	[TAG_CFRAME] = function(Buffer: buffer, Count: number): (CFrame, number)
@@ -622,21 +654,28 @@ BinaryCodec.Readers = {
 		const count = buffer.readu16(Buffer, Count)
 		Count += 2
 
-		const Readers = BinaryCodec.Readers
-
 		const Table = {}
 		for _ = 1, count do
 			--read le key
 			const KeyTag = buffer.readu8(Buffer, Count)
 			Count += 1
+			const KeyReader = GetReader(KeyTag)
+			if not KeyReader then
+				Count += 1 --skip the value
+				continue
+			end
 			local Key
-			Key, Count = Readers[KeyTag](Buffer, Count, InstanceList)
+			Key, Count = KeyReader(Buffer, Count, InstanceList)
 
 			--read le value
 			const ValueTag = buffer.readu8(Buffer, Count :: any)
 			Count += 1
+			const ValueReader = GetReader(ValueTag)
+			if not ValueReader then
+				continue
+			end
 			local Value
-			Value, Count = Readers[ValueTag](Buffer, Count, InstanceList)
+			Value, Count = ValueReader(Buffer, Count, InstanceList)
 
 			--set the damn thing
 			Table[Key] = Value
@@ -652,6 +691,6 @@ BinaryCodec.Readers = {
 	[TAG_VECTOR3INT16] = function(Buffer: buffer, Count: number): (Vector3int16, number)
 		return Vector3int16.new(buffer.readi16(Buffer, Count), buffer.readi16(Buffer, Count + 2), buffer.readi16(Buffer, Count + 4)), Count + 6
 	end,
-} :: { (Buffer: buffer, Count: number, InstanceList: { Instance }) -> (any, number) }
+}
 
 return DeepFreezeTable(BinaryCodec)
