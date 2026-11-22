@@ -9,62 +9,64 @@ const HttpService = game:GetService("HttpService")
 
 --common tags on their own var
 const TAG_NIL = 0
-const TAG_BOOLEAN = 1
-const TAG_INT8 = 2
-const TAG_INT16 = 3
-const TAG_INT32 = 4
-const TAG_FLOAT32 = 5
-const TAG_FLOAT64 = 6
-const TAG_VECTOR3 = 7
-const TAG_JSON = 8
-const TAG_BUFFER = 9
-const TAG_STRING = 10
-const TAG_CFRAME = 11
-const TAG_VECTOR2 = 12
-const TAG_COLOR3 = 13
-const TAG_UDIM2 = 14
-const TAG_BRICKCOLOR = 15
-const TAG_RECT = 16
-const TAG_NUMBERRANGE = 17
-const TAG_UDIM = 18
-const TAG_DATETIME = 19
-const TAG_COLORSEQUENCE = 20
-const TAG_NUMBERSEQUENCE = 21
-const TAG_TWEENINFO = 22
-const TAG_INSTANCE = 23
-const TAG_MAP = 24
-const TAG_VECTOR2INT16 = 25
-const TAG_VECTOR3INT16 = 26
+const TAG_FALSE = 1
+const TAG_TRUE = 2
+const TAG_INT8 = 3
+const TAG_INT16 = 4
+const TAG_INT32 = 5
+const TAG_FLOAT32 = 6
+const TAG_FLOAT64 = 7
+const TAG_VECTOR3 = 8
+const TAG_JSON = 9
+const TAG_BUFFER = 10
+const TAG_STRING = 11
+const TAG_CFRAME = 12
+const TAG_VECTOR2 = 13
+const TAG_COLOR3 = 14
+const TAG_UDIM2 = 15
+const TAG_BRICKCOLOR = 16
+const TAG_RECT = 17
+const TAG_NUMBERRANGE = 18
+const TAG_UDIM = 19
+const TAG_DATETIME = 20
+const TAG_COLORSEQUENCE = 21
+const TAG_NUMBERSEQUENCE = 22
+const TAG_TWEENINFO = 23
+const TAG_INSTANCE = 24
+const TAG_MAP = 25
+const TAG_VECTOR2INT16 = 26
+const TAG_VECTOR3INT16 = 27
 
 const BinaryCodec = {
 	Enum = {
 		NIL = TAG_NIL,
-		boolean = TAG_BOOLEAN,
+		False = TAG_FALSE,
+		True = TAG_TRUE,
 		Int8 = TAG_INT8,
 		Int16 = TAG_INT16,
 		Int32 = TAG_INT32,
 		Float32 = TAG_FLOAT32,
 		Float64 = TAG_FLOAT64,
-		Vector3 = 7,
+		Vector3 = TAG_VECTOR3,
 		JSON = TAG_JSON,
 		buffer = TAG_BUFFER,
 		string = TAG_STRING,
-		CFrame = 11,
-		Vector2 = 12,
-		Color3 = 13,
-		UDim2 = 14,
-		BrickColor = 15,
-		Rect = 16,
-		NumberRange = 17,
-		UDim = 18,
-		DateTime = 19,
+		CFrame = TAG_CFRAME,
+		Vector2 = TAG_VECTOR2,
+		Color3 = TAG_COLOR3,
+		UDim2 = TAG_UDIM2,
+		BrickColor = TAG_BRICKCOLOR,
+		Rect = TAG_RECT,
+		NumberRange = TAG_NUMBERRANGE,
+		UDim = TAG_UDIM,
+		DateTime = TAG_DATETIME,
 		ColorSequence = TAG_COLORSEQUENCE,
 		NumberSequence = TAG_NUMBERSEQUENCE,
-		TweenInfo = 22,
-		Instance = 23,
+		TweenInfo = TAG_TWEENINFO,
+		Instance = TAG_INSTANCE,
 		Map = TAG_MAP,
-		Vector2int16 = 25,
-		Vector3int16 = 26,
+		Vector2int16 = TAG_VECTOR2INT16,
+		Vector3int16 = TAG_VECTOR3INT16,
 	} :: { [string]: number },
 }
 
@@ -73,7 +75,8 @@ const ENUM = BinaryCodec.Enum
 --setting the size of every type beforehand to not have to calculate it unless it's necessary
 const FIXED_SIZES = table.freeze({
 	[TAG_NIL] = 0,
-	[TAG_BOOLEAN] = 1,
+	[TAG_TRUE] = 0,
+	[TAG_FALSE] = 0,
 	[TAG_INT8] = 1,
 	[TAG_INT16] = 2,
 	[TAG_INT32] = 4,
@@ -127,6 +130,14 @@ end
 const function GetTagFromValue(Value: any): number
 	if Value == nil then
 		return TAG_NIL
+	end
+
+	if Value == true then
+		return TAG_TRUE
+	end
+
+	if Value == false then
+		return TAG_FALSE
 	end
 
 	const Type = typeof(Value)
@@ -206,9 +217,12 @@ BinaryCodec.Writers = {
 		return Count
 	end,
 
-	[TAG_BOOLEAN] = function(Buffer: buffer, Count: number, Value: boolean): number
-		buffer.writeu8(Buffer, Count, Value and 1 or 0)
-		return Count + 1
+	[TAG_FALSE] = function(_Buffer: buffer, Count: number): number
+		return Count
+	end,
+
+	[TAG_TRUE] = function(_Buffer: buffer, Count: number): number
+		return Count
 	end,
 
 	[TAG_INT8] = function(Buffer: buffer, Count: number, Value: number): number
@@ -436,8 +450,12 @@ BinaryCodec.Readers = {
 		return nil, Count
 	end,
 
-	[TAG_BOOLEAN] = function(Buffer: buffer, Count: number): (boolean, number)
-		return buffer.readu8(Buffer, Count) == 1, Count + 1
+	[TAG_FALSE] = function(_Buffer: buffer, Count: number): (false, number)
+		return false, Count
+	end,
+
+	[TAG_TRUE] = function(_Buffer: buffer, Count: number): (false, number)
+		return false, Count
 	end,
 
 	[TAG_INT8] = function(Buffer: buffer, Count: number): (number, number)
