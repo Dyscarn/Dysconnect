@@ -509,6 +509,9 @@ BinaryCodec.Readers = {
 
 	[TAG_BUFFER] = function(Buffer: buffer, Count: number): (buffer, number)
 		const len = buffer.readu32(Buffer, Count)
+		if len > buffer.len(Buffer) - (Count + 4) then
+			error("[Dysconnect] Malformed buffer length.")
+		end
 		const newBuf = buffer.create(len)
 		buffer.copy(newBuf, 0, Buffer, Count + 4, len)
 		return newBuf, Count + 4 + len
