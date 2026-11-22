@@ -36,6 +36,7 @@ const TAG_INSTANCE = 24
 const TAG_MAP = 25
 const TAG_VECTOR2INT16 = 26
 const TAG_VECTOR3INT16 = 27
+const TAG_LONGSTRING = 28
 
 const BinaryCodec = {
 	Enum = {
@@ -67,6 +68,7 @@ const BinaryCodec = {
 		Map = TAG_MAP,
 		Vector2int16 = TAG_VECTOR2INT16,
 		Vector3int16 = TAG_VECTOR3INT16,
+		LongString = TAG_LONGSTRING,
 	} :: { [string]: number },
 }
 
@@ -166,6 +168,14 @@ const function GetTagFromValue(Value: any): number
 		return TAG_MAP
 	end
 
+	if Type == "string" then
+		if #Value <= 255 then
+			return TAG_STRING
+		end
+
+		return TAG_LONGSTRING
+	end
+
 	if ENUM[Type] then
 		return ENUM[Type]
 	end
@@ -196,7 +206,9 @@ const function GetPayloadSize(tag: number, value: any): number
 	end
 
 	if tag == TAG_STRING then
-		return 4 + #value
+		return 1 + #value
+	elseif tag == TAG_LONGSTRING then
+		return 2 + #value
 	elseif tag == TAG_JSON then
 		const encoded = HttpService:JSONEncode(value)
 		return 4 + #encoded
@@ -274,9 +286,16 @@ BinaryCodec.Writers = {
 
 	[TAG_STRING] = function(Buffer: buffer, Count: number, Value: string): number
 		const len = #Value
-		buffer.writeu32(Buffer, Count, len)
-		buffer.writestring(Buffer, Count + 4, Value)
-		return Count + 4 + len
+		buffer.writeu8(Buffer, Count, len)
+		buffer.writestring(Buffer, Count + 1, Value)
+		return Count + 1 + len
+	end,
+
+	[TAG_LONGSTRING] = function(Buffer: buffer, Count: number, Value: string): number
+		const len = #Value
+		buffer.writeu16(Buffer, Count, len)
+		buffer.writestring(Buffer, Count + 2, Value)
+		return Count + 2 + len
 	end,
 
 	[TAG_CFRAME] = function(Buffer: buffer, Count: number, Value: CFrame): number
@@ -496,8 +515,13 @@ BinaryCodec.Readers = {
 	end,
 
 	[TAG_STRING] = function(Buffer: buffer, Count: number): (string, number)
-		const len = buffer.readu32(Buffer, Count)
-		return buffer.readstring(Buffer, Count + 4, len), Count + 4 + len
+		const len = buffer.readu8(Buffer, Count)
+		return buffer.readstring(Buffer, Count + 1, len), Count + 1 + len
+	end,
+
+	[TAG_LONGSTRING] = function(Buffer: buffer, Count: number): (string, number)
+		const len = buffer.readu16(Buffer, Count)
+		return buffer.readstring(Buffer, Count + 1, len), Count + 1 + len
 	end,
 
 	[TAG_CFRAME] = function(Buffer: buffer, Count: number): (CFrame, number)
