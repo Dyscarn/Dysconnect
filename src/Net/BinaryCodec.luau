@@ -39,6 +39,9 @@ const TAG_VECTOR3INT16 = 27
 const TAG_LONGSTRING = 28
 const TAG_ARRAY = 29
 const TAG_LONGERSTRING = 30
+const TAG_UINT8 = 31
+const TAG_UINT16 = 32
+const TAG_UINT32 = 33
 
 const BinaryCodec = {
 	Enum = {
@@ -73,6 +76,9 @@ const BinaryCodec = {
 		LongString = TAG_LONGSTRING,
 		Array = TAG_ARRAY,
 		LongerString = TAG_LONGERSTRING,
+		UInt8 = TAG_UINT8,
+		UInt16 = TAG_UINT16,
+		UInt32 = TAG_UINT32,
 	} :: { [string]: number },
 }
 
@@ -102,6 +108,9 @@ const FIXED_SIZES = table.freeze({
 	[TAG_INSTANCE] = 2,
 	[TAG_VECTOR2INT16] = 4,
 	[TAG_VECTOR3INT16] = 6,
+	[TAG_UINT8] = 1,
+	[TAG_UINT16] = 2,
+	[TAG_UINT32] = 4,
 }) :: { number }
 
 --tweeninfo stuffs
@@ -142,10 +151,6 @@ const function IsArray(Value: { any }): boolean
 	return count == len
 end
 
-const function IsNumberAnInt(Value: number): boolean
-	return Value % 1 == 0 --if the remainder of the number divided by 1 is 0 then there's no decimal remainder for the number therefore it's an int
-end
-
 const function IsNumberBetweenBounds(Value: number, Minimum: number, Maximum: number): boolean
 	return Value >= Minimum and Value <= Maximum
 end
@@ -166,23 +171,45 @@ const function GetTagFromValue(Value: any): number
 	const Type = typeof(Value)
 
 	if Type == "number" then
-		if not IsNumberAnInt(Value) then
+		--NaN and infinity
+		--they shouldn't be sent as it's not supported and it's a bit unnecessary
+		if Value ~= Value or Value == math.huge or Value == -math.huge then
+			return TAG_NIL
+		end
+
+		if Value % 1 ~= 0 then --if the remainder of the number divided by 1 is 0 then there's no decimal remainder for the number therefore it's an int
 			return if math.abs(Value) > 16_777_216 then TAG_FLOAT64 else TAG_FLOAT32 -- 2^24
 		end
 
-		if IsNumberBetweenBounds(Value, -128, 127) then -- signed:  -(2^8) / 2 ; (2^8) / 2 - 1
+		if Value >= 0 then
+			if IsNumberBetweenBounds(Value, 0, 255) then
+				return TAG_UINT8
+			end
+
+			if IsNumberBetweenBounds(Value, 256, 65_535) then
+				return TAG_UINT16
+			end
+
+			if IsNumberBetweenBounds(Value, 65_536, 4_294_967_295) then
+				return TAG_UINT32
+			end
+
+			return TAG_FLOAT64
+		end
+
+		if Value >= -128 then -- signed:  -(2^8) / 2 ; (2^8) / 2 - 1
 			return TAG_INT8
 		end
 
-		if IsNumberBetweenBounds(Value, -32_768, 32_767) then -- signed:  -(2^16) / 2 ; (2^16) / 2 - 1
+		if Value >= -32_768 then -- signed:  -(2^16) / 2 ; (2^16) / 2 - 1
 			return TAG_INT16
 		end
 
-		if IsNumberBetweenBounds(Value, -2_147_483_648, 2_147_483_647) then -- signed:  -(2^32) / 2 ; (2^32) / 2 - 1
+		if Value >= -2_147_483_648 then -- signed:  -(2^32) / 2 ; (2^32) / 2 - 1
 			return TAG_INT32
 		end
 
-		return if math.abs(Value) > 16_777_216 then TAG_FLOAT64 else TAG_FLOAT32 -- 2^24
+		return TAG_FLOAT64
 	end
 
 	if Type == "table" then
@@ -194,7 +221,7 @@ const function GetTagFromValue(Value: any): number
 			return TAG_STRING
 		end
 
-		if #Value <= 65535 then
+		if #Value <= 65_535 then
 			return TAG_LONGSTRING
 		end
 
@@ -288,13 +315,28 @@ WRITERS = {
 		return Count + 1
 	end,
 
+	[TAG_UINT8] = function(Buffer: buffer, Count: number, Value: number): number
+		buffer.writeu8(Buffer, Count, Value)
+		return Count + 1
+	end,
+
 	[TAG_INT16] = function(Buffer: buffer, Count: number, Value: number): number
 		buffer.writei16(Buffer, Count, Value)
 		return Count + 2
 	end,
 
+	[TAG_UINT16] = function(Buffer: buffer, Count: number, Value: number): number
+		buffer.writeu16(Buffer, Count, Value)
+		return Count + 2
+	end,
+
 	[TAG_INT32] = function(Buffer: buffer, Count: number, Value: number): number
 		buffer.writei32(Buffer, Count, Value)
+		return Count + 4
+	end,
+
+	[TAG_UINT32] = function(Buffer: buffer, Count: number, Value: number): number
+		buffer.writeu32(Buffer, Count, Value)
 		return Count + 4
 	end,
 
@@ -579,12 +621,24 @@ READERS = {
 		return buffer.readi8(Buffer, Count), Count + 1
 	end,
 
+	[TAG_UINT8] = function(Buffer: buffer, Count: number): (number, number)
+		return buffer.readu8(Buffer, Count), Count + 1
+	end,
+
 	[TAG_INT16] = function(Buffer: buffer, Count: number): (number, number)
 		return buffer.readi16(Buffer, Count), Count + 2
 	end,
 
+	[TAG_UINT16] = function(Buffer: buffer, Count: number): (number, number)
+		return buffer.readu16(Buffer, Count), Count + 2
+	end,
+
 	[TAG_INT32] = function(Buffer: buffer, Count: number): (number, number)
 		return buffer.readi32(Buffer, Count), Count + 4
+	end,
+
+	[TAG_UINT32] = function(Buffer: buffer, Count: number): (number, number)
+		return buffer.readu32(Buffer, Count), Count + 4
 	end,
 
 	[TAG_FLOAT32] = function(Buffer: buffer, Count: number): (number, number)
