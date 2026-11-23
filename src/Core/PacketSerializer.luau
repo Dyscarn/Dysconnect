@@ -7,8 +7,8 @@ const Config = require("../Config")
 const BinaryCodec = require("../Net/BinaryCodec")
 const IdentifierRegistry = require("./IdentifierRegistry")
 
-const function GetSizeOfBatchEvent(name: string, Args: Types.Args): number
-	local Size = 4 + #name
+const function GetSizeOfBatchEvent(Args: Types.Args): number
+	local Size = 5 --4 + 1 for event id
 	for i = 1, Args.n do
 		const Arg = Args[i]
 		-- + 1 for tag
@@ -22,11 +22,11 @@ const function UnpackArgTable(ArgTable: { [any]: any }): ...any
 end
 
 const function PackArgumentsForNetwork(Name: string, Arguments: Types.Args): { any }
+	const NameId = IdentifierRegistry.GetIDFromName(Name)
 	if Arguments.n == 0 then
-		return { Name, {} }
+		return { NameId }
 	end
 
-	local NameId = IdentifierRegistry.GetIDFromName(Name)
 	--calculate the total size of the buffer
 	local TotalSize = 1 --1 for event name id
 	const PreparedArgs = {} :: {
@@ -185,7 +185,8 @@ const function PackBatchEnvelope(Entries: { Types.BatchPacket }): (buffer, { Ins
 	}
 
 	for _, Entry in Entries do
-		TotalSize += 4 + #Entry.EventName
+		-- TotalSize += 4 + #Entry.EventName
+		TotalSize += 5 --4 + 1 for event id
 
 		const EntryArgs = {} :: { { Tag: number, Value: any, Size: number } }
 		local EntrySize = 0
@@ -226,8 +227,6 @@ const function PackBatchEnvelope(Entries: { Types.BatchPacket }): (buffer, { Ins
 
 	buffer.writeu16(Buffer, Offset, EntryCount)
 	Offset += 2
-	buffer.writeu16(Buffer, Offset, #InstanceList)
-	Offset += 2
 
 	for _, Payload in Prepared do
 		Payload.Offset = Offset
@@ -260,8 +259,6 @@ const function UnpackBatchEnvelope(Buffer: buffer, InstanceList: { Instance }): 
 
 	const EntryCount = buffer.readu16(Buffer, Offset)
 	Offset += 2
-	const _InstanceCount = buffer.readu16(Buffer, Offset)
-	Offset += 2
 
 	const Entries = {} :: { Types.ReceivedBatchPacket }
 
@@ -273,6 +270,7 @@ const function UnpackBatchEnvelope(Buffer: buffer, InstanceList: { Instance }): 
 		const ArgCount = buffer.readu8(Buffer, Offset)
 		Offset += 1
 		const EntrySize = buffer.readu16(Buffer, Offset)
+		const PrevOffset = Offset
 		Offset += 2
 
 		const Args = table.create(ArgCount) :: Types.Args
@@ -283,6 +281,8 @@ const function UnpackBatchEnvelope(Buffer: buffer, InstanceList: { Instance }): 
 			Offset += 1
 			const Reader = BinaryCodec.GetReader(Tag)
 			if not Reader then
+				Offset = PrevOffset + EntrySize
+				warn(`[Dysconnect] Couldn't find reader for tag {Tag}! Skipping to next fire in the batch...`)
 				break --can't move on to next since if it just continues it'll break
 			end
 			const Value, NewOffset = Reader(Buffer, Offset, InstanceList)

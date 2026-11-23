@@ -24,7 +24,7 @@ function ExhaustionDetector.Setup()
 end
 
 function ExhaustionDetector.CheckPlayerRateLimit(Player: Player, EventType: "RemoteEvent" | "RemoteFunction" | "UnreliableRemoteEvent"): boolean
-	if EventType == "UnreliableRemoteEvent" and Config.ExhaustionDetection.URemoteEventRateIncreaseMult <= 0 then
+	if EventType == "UnreliableRemoteEvent" and Config.Authority.URemoteEventRateIncreaseMult <= 0 then
 		return true
 	end
 
@@ -38,17 +38,17 @@ function ExhaustionDetector.CheckPlayerRateLimit(Player: Player, EventType: "Rem
 
 	const Elapsed = Now - Data.Last
 	--check how many remotes it's fired before the second passes
-	const Used = Elapsed * Config.ExhaustionDetection.RateDropPerSecond
+	const Used = Elapsed * Config.Authority.RateDropPerSecond
 
 	Data.Total = math.max(0, Data.Total - Used)
 	Data.Last = Now
 
 	--check if it exceeds the limit
-	if Data.Total >= Config.ExhaustionDetection.RateLimit then
+	if Data.Total >= Config.Authority.RateLimit then
 		return false
 	end
 
-	Data.Total += EventType == "UnreliableRemoteEvent" and Config.ExhaustionDetection.URemoteEventRateIncreaseMult or 1
+	Data.Total += EventType == "UnreliableRemoteEvent" and Config.Authority.URemoteEventRateIncreaseMult or 1
 
 	return true
 end

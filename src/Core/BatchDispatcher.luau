@@ -58,7 +58,7 @@ const function FireQueuedCalls()
 	} :: { [Types.RemoteType]: { [Player | "All" | "Server"]: number } }
 	const IndexesToRemove = {} :: { number }
 	for Index, Event in BatchQueue do
-		const BufferLength = PacketSerializer.GetSizeOfBatchEvent(Event.EventName, Event.Args)
+		const BufferLength = PacketSerializer.GetSizeOfBatchEvent(Event.Args)
 		const EventType = Event.EventType
 		const EventTarget = Event.Target or "Server"
 

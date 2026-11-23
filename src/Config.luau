@@ -32,7 +32,7 @@ const Config = {
 		Strict = true,
 	}),
 	--[=[
-		@interface ExhaustionDetection
+		@interface Authority
 		@within Dysconnect
 		
 		Configuration for per-player network exhaustion detection.
@@ -41,11 +41,13 @@ const Config = {
 		
 		Modifiable in the network script or in [Dysconnect.Init].
 		
+		.AllowJsonFromClients boolean -- If the server should accept JSON arguments from events. This is important as they're large and slow to process.
 		.RateLimit number -- Maximum accumulated usage before requests are rejected.
 		.RateDropPerSecond number -- Rate at which accumulated usage decays per second.
 		.URemoteEventRateIncreaseMult number -- Amount of usage added by each [UnreliableRemoteEvent] call.
 	]=]
-	ExhaustionDetection = table.freeze({
+	Authority = table.freeze({
+		AllowJsonFromClients = true,
 		RateLimit = 50,
 		RateDropPerSecond = 18,
 		URemoteEventRateIncreaseMult = 0,
@@ -77,12 +79,12 @@ const Config = {
 	Configurations to apply to the network service when initializing.
 	
 	.DebugConfig Debug -- Read [Debug].
-	.ExhaustionDetectionConfig ExhaustionDetection -- Read [ExhaustionDetection].
+	.AuthorityConfig Authority -- Read [Authority].
 	.Batching Batching -- Read [Batching].
 ]=]
 export type InitConfig = {
 	DebugConfig: typeof(Config.Debug)?,
-	ExhaustionDetectionConfig: typeof(Config.ExhaustionDetection)?,
+	AuthorityConfig: typeof(Config.Authority)?,
 	Batching: typeof(Config.Batching)?,
 }
 

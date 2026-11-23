@@ -38,6 +38,7 @@ const TAG_VECTOR2INT16 = 26
 const TAG_VECTOR3INT16 = 27
 const TAG_LONGSTRING = 28
 const TAG_ARRAY = 29
+const TAG_LONGERSTRING = 30
 
 const BinaryCodec = {
 	Enum = {
@@ -71,6 +72,7 @@ const BinaryCodec = {
 		Vector3int16 = TAG_VECTOR3INT16,
 		LongString = TAG_LONGSTRING,
 		Array = TAG_ARRAY,
+		LongerString = TAG_LONGERSTRING,
 	} :: { [string]: number },
 }
 
@@ -192,7 +194,11 @@ const function GetTagFromValue(Value: any): number
 			return TAG_STRING
 		end
 
-		return TAG_LONGSTRING
+		if #Value <= 65535 then
+			return TAG_LONGSTRING
+		end
+
+		return TAG_LONGERSTRING
 	end
 
 	if ENUM[Type] then
@@ -228,6 +234,8 @@ const function GetPayloadSize(tag: number, value: any): number
 		return 1 + #value
 	elseif tag == TAG_LONGSTRING then
 		return 2 + #value
+	elseif tag == TAG_LONGERSTRING then
+		return 3 + #value
 	elseif tag == TAG_JSON then
 		const encoded = HttpService:JSONEncode(value)
 		return 4 + #encoded
@@ -255,7 +263,7 @@ local WRITERS: { [number]: (Buffer: buffer, Count: number, Value: any, InstanceL
 const function GetWriter(Tag: number): ((Buffer: buffer, Count: number, Value: any, InstanceList: { Instance }) -> number)?
 	const Writer = WRITERS[Tag]
 	if not Writer then
-		error(`[Dysconnect] Writer not found for tag [Tag]!`)
+		error(`[Dysconnect] Writer not found for tag {Tag}!`)
 		return nil
 	end
 	return Writer
@@ -334,6 +342,13 @@ WRITERS = {
 		buffer.writeu16(Buffer, Count, len)
 		buffer.writestring(Buffer, Count + 2, Value)
 		return Count + 2 + len
+	end,
+
+	[TAG_LONGERSTRING] = function(Buffer: buffer, Count: number, Value: string): number
+		const len = #Value
+		buffer.writeu32(Buffer, Count, len)
+		buffer.writestring(Buffer, Count + 3, Value)
+		return Count + 3 + len
 	end,
 
 	[TAG_CFRAME] = function(Buffer: buffer, Count: number, Value: CFrame): number
@@ -528,19 +543,19 @@ WRITERS = {
 			if not Writer then
 				continue
 			end
-			Writer(Buffer, Count, Item, InstanceList)
+			Count = Writer(Buffer, Count, Item, InstanceList)
 		end
 
 		return Count
 	end,
 }
 
-local READERS: { (Buffer: buffer, Count: number, InstanceList: { Instance }) -> (any, number) }
+local READERS: { (Buffer: buffer, Count: number, InstanceList: { Instance }, ...any) -> (any, number) }
 
-const function GetReader(Tag: number): ((Buffer: buffer, Count: number, InstanceList: { Instance }) -> (any, number))?
+const function GetReader(Tag: number): ((Buffer: buffer, Count: number, InstanceList: { Instance }, ...any) -> (any, number))?
 	const Reader = READERS[Tag]
 	if not Reader then
-		error(`[Dysconnect] Reader not found for tag [Tag]!`)
+		error(`[Dysconnect] Reader not found for tag {Tag}!`)
 		return nil
 	end
 	return Reader
@@ -608,6 +623,11 @@ READERS = {
 	[TAG_LONGSTRING] = function(Buffer: buffer, Count: number): (string, number)
 		const len = buffer.readu16(Buffer, Count)
 		return buffer.readstring(Buffer, Count + 2, len), Count + 2 + len
+	end,
+
+	[TAG_LONGERSTRING] = function(Buffer: buffer, Count: number): (string, number)
+		const len = buffer.readu32(Buffer, Count)
+		return buffer.readstring(Buffer, Count + 3, len), Count + 3 + len
 	end,
 
 	[TAG_CFRAME] = function(Buffer: buffer, Count: number): (CFrame, number)
@@ -718,6 +738,15 @@ READERS = {
 			local Key
 			Key, Count = KeyReader(Buffer, Count, InstanceList)
 
+			if Key == nil then
+				warn(`[Dysconnect] Nil map key, skipping.`)
+				continue
+			end
+			if Key ~= Key then --this might look stupid BUT it works
+				warn(`[Dysconnect] NaN map key, skipping.`)
+				continue
+			end
+
 			--read le value
 			const ValueTag = buffer.readu8(Buffer, Count :: any)
 			Count += 1
@@ -743,9 +772,18 @@ READERS = {
 		return Vector3int16.new(buffer.readi16(Buffer, Count), buffer.readi16(Buffer, Count + 2), buffer.readi16(Buffer, Count + 4)), Count + 6
 	end,
 
-	[TAG_ARRAY] = function(Buffer: buffer, Count: number, InstanceList: { Instance }): ({ any }, number)
+	[TAG_ARRAY] = function(Buffer: buffer, Count: number, InstanceList: { Instance }, Depth: number): ({ any }, number)
 		const len = buffer.readu16(Buffer, Count)
 		Count += 2
+
+		if Depth ~= nil then
+			if Depth > 32 then
+				error(`[Dysconnect] Max nesting depth exceeded!`)
+			end
+			Depth += 1
+		else
+			Depth = 1
+		end
 
 		const Result = table.create(len)
 		for Index = 1, len do
@@ -756,7 +794,7 @@ READERS = {
 				continue
 			end
 			local Item
-			Item, Count = Reader(Buffer, Count, InstanceList)
+			Item, Count = Reader(Buffer, Count, InstanceList, Depth)
 			Result[Index] = Item
 		end
 

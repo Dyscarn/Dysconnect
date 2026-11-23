@@ -260,8 +260,8 @@ const function Init(config: Config.InitConfig?)
 		if config.DebugConfig then
 			Config.Debug = table.freeze(WriteMissingTableValues(config.DebugConfig, Config.Debug))
 		end
-		if config.ExhaustionDetectionConfig then
-			Config.ExhaustionDetection = table.freeze(WriteMissingTableValues(config.ExhaustionDetectionConfig, Config.ExhaustionDetection))
+		if config.AuthorityConfig then
+			Config.Authority = table.freeze(WriteMissingTableValues(config.AuthorityConfig, Config.Authority))
 		end
 		if config.Batching then
 			Config.Batching = table.freeze(WriteMissingTableValues(config.Batching, Config.Batching))
