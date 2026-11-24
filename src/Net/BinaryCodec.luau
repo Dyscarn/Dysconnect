@@ -7,6 +7,8 @@
 
 const HttpService = game:GetService("HttpService")
 
+const EPSILON = 1e-5
+
 --common tags on their own var
 const TAG_NIL = 0
 const TAG_FALSE = 1
@@ -42,6 +44,7 @@ const TAG_LONGERSTRING = 30
 const TAG_UINT8 = 31
 const TAG_UINT16 = 32
 const TAG_UINT32 = 33
+const TAG_CFRAMEPOS = 34
 
 const BinaryCodec = {
 	Enum = {
@@ -79,6 +82,7 @@ const BinaryCodec = {
 		UInt8 = TAG_UINT8,
 		UInt16 = TAG_UINT16,
 		UInt32 = TAG_UINT32,
+		CFramePos = TAG_CFRAMEPOS,
 	} :: { [string]: number },
 }
 
@@ -111,6 +115,7 @@ const FIXED_SIZES = table.freeze({
 	[TAG_UINT8] = 1,
 	[TAG_UINT16] = 2,
 	[TAG_UINT32] = 4,
+	[TAG_CFRAMEPOS] = 12,
 }) :: { number }
 
 --tweeninfo stuffs
@@ -226,6 +231,15 @@ const function GetTagFromValue(Value: any): number
 		end
 
 		return TAG_LONGERSTRING
+	end
+
+	if Type == "CFrame" then
+		const _, ang = (Value :: CFrame):ToAxisAngle()
+		if math.abs(ang) < EPSILON then
+			return TAG_CFRAMEPOS
+		end
+
+		return TAG_CFRAME
 	end
 
 	if ENUM[Type] then
@@ -391,6 +405,14 @@ WRITERS = {
 		buffer.writeu32(Buffer, Count, len)
 		buffer.writestring(Buffer, Count + 3, Value)
 		return Count + 3 + len
+	end,
+	
+	[TAG_CFRAMEPOS] = function(Buffer: buffer, Count: number, Value: CFrame): number
+		const pos = Value.Position
+		buffer.writef32(Buffer, Count, pos.X)
+		buffer.writef32(Buffer, Count + 4, pos.Y)
+		buffer.writef32(Buffer, Count + 8, pos.Z)
+		return Count + 12
 	end,
 
 	[TAG_CFRAME] = function(Buffer: buffer, Count: number, Value: CFrame): number
@@ -684,16 +706,15 @@ READERS = {
 		return buffer.readstring(Buffer, Count + 3, len), Count + 3 + len
 	end,
 
+	[TAG_CFRAMEPOS] = function(Buffer: buffer, Count: number): (CFrame, number)
+		return CFrame.new(buffer.readf32(Buffer, Count), buffer.readf32(Buffer, Count + 4), buffer.readf32(Buffer, Count + 8)), Count + 12
+	end,
+
 	[TAG_CFRAME] = function(Buffer: buffer, Count: number): (CFrame, number)
-		const px, py, pz = buffer.readf32(Buffer, Count), buffer.readf32(Buffer, Count + 4), buffer.readf32(Buffer, Count + 8)
-		const ax, ay, az = buffer.readf32(Buffer, Count + 12), buffer.readf32(Buffer, Count + 16), buffer.readf32(Buffer, Count + 20)
+		const pos = Vector3.new(buffer.readf32(Buffer, Count), buffer.readf32(Buffer, Count + 4), buffer.readf32(Buffer, Count + 8))
+		const axis = Vector3.new(buffer.readf32(Buffer, Count + 12), buffer.readf32(Buffer, Count + 16), buffer.readf32(Buffer, Count + 20))
 		const ang = buffer.readf32(Buffer, Count + 24)
-		const pos = Vector3.new(px, py, pz)
-		const axis = Vector3.new(ax, ay, az)
-		if ang == 0 then
-			return CFrame.new(pos), Count + 28
-		end
-		return CFrame.fromAxisAngle(axis, ang) + pos, Count + 28
+		return CFrame.new(pos) * CFrame.fromAxisAngle(axis, ang), Count + 28
 	end,
 
 	[TAG_VECTOR2] = function(Buffer: buffer, Count: number): (Vector2, number)
