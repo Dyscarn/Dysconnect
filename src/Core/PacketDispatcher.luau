@@ -153,7 +153,7 @@ const function OnRemoteFunctionPacket(Player: Player?, Args: { any }): any
 		return
 	end
 
-	const CompressedResults = PacketSerializer.PackArgumentsForNetwork("_RFunc", Results) --using a dummy name, ignore
+	const CompressedResults = PacketSerializer.PackArgumentsForNetwork("__RFunc", Results) --using a dummy name, ignore
 
 	return CompressedResults
 end
