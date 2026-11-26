@@ -179,6 +179,7 @@ const function GetTagFromValue(Value: any): number
 		--NaN and infinity
 		--they shouldn't be sent as it's not supported and it's a bit unnecessary
 		if Value ~= Value or Value == math.huge or Value == -math.huge then
+			warn(`[Dysconnect] Value is NaN or +-Infinity! It'll be sent as nil!`)
 			return TAG_NIL
 		end
 
@@ -301,11 +302,10 @@ BinaryCodec.GetPayloadSize = GetPayloadSize
 
 local WRITERS: { [number]: (Buffer: buffer, Count: number, Value: any, InstanceList: { Instance }) -> number }
 
-const function GetWriter(Tag: number): ((Buffer: buffer, Count: number, Value: any, InstanceList: { Instance }) -> number)?
+const function GetWriter(Tag: number): (Buffer: buffer, Count: number, Value: any, InstanceList: { Instance }) -> number
 	const Writer = WRITERS[Tag]
 	if not Writer then
 		error(`[Dysconnect] Writer not found for tag {Tag}!`)
-		return nil
 	end
 	return Writer
 end
@@ -388,6 +388,11 @@ WRITERS = {
 
 	[TAG_STRING] = function(Buffer: buffer, Count: number, Value: string): number
 		const len = #Value
+		if len > 65535 then
+			warn(`[Dysconnect] String "{Value} exceeds 255 character limit for string!"`)
+			buffer.writeu8(Buffer, Count, 0)
+			return Count + 1
+		end
 		buffer.writeu8(Buffer, Count, len)
 		buffer.writestring(Buffer, Count + 1, Value)
 		return Count + 1 + len
@@ -395,6 +400,11 @@ WRITERS = {
 
 	[TAG_LONGSTRING] = function(Buffer: buffer, Count: number, Value: string): number
 		const len = #Value
+		if len > 65535 then
+			warn(`[Dysconnect] String "{Value} exceeds 65535 character limit for LongString!"`)
+			buffer.writeu16(Buffer, Count, 0)
+			return Count + 2
+		end
 		buffer.writeu16(Buffer, Count, len)
 		buffer.writestring(Buffer, Count + 2, Value)
 		return Count + 2 + len
@@ -402,6 +412,11 @@ WRITERS = {
 
 	[TAG_LONGERSTRING] = function(Buffer: buffer, Count: number, Value: string): number
 		const len = #Value
+		if len > 4_294_967_295 then
+			warn(`[Dysconnect] String "{Value} exceeds 65535 character limit for LongString!"`)
+			buffer.writeu32(Buffer, Count, 0)
+			return Count + 3
+		end
 		buffer.writeu32(Buffer, Count, len)
 		buffer.writestring(Buffer, Count + 3, Value)
 		return Count + 3 + len
@@ -527,10 +542,14 @@ WRITERS = {
 	end,
 
 	[TAG_INSTANCE] = function(Buffer: buffer, Count: number, Value: Instance, InstanceList: { Instance }): number
-		table.insert(InstanceList, Value)
 		const Length = #InstanceList
+		if Length >= 65_535 then
+			warn(`[Dysconnect] Instance count exceeds the cap of 65535 elements! {Value} will be sent as nil!`)
+			return Count
+		end
+		table.insert(InstanceList, Value)
 
-		buffer.writeu16(Buffer, Count, Length)
+		buffer.writeu16(Buffer, Count, Length + 1)
 		return Count + 2
 	end,
 
@@ -616,11 +635,10 @@ WRITERS = {
 
 local READERS: { (Buffer: buffer, Count: number, InstanceList: { Instance }, ...any) -> (any, number) }
 
-const function GetReader(Tag: number): ((Buffer: buffer, Count: number, InstanceList: { Instance }, ...any) -> (any, number))?
+const function GetReader(Tag: number): (Buffer: buffer, Count: number, InstanceList: { Instance }, ...any) -> (any, number)
 	const Reader = READERS[Tag]
 	if not Reader then
 		error(`[Dysconnect] Reader not found for tag {Tag}!`)
-		return nil
 	end
 	return Reader
 end
